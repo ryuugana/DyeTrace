@@ -2,9 +2,9 @@
 //! exercised without a client.
 
 use crate::bmp;
-use crate::traits::{Mouse, Screen};
+use crate::traits::{GameWindow, Mouse, Rect, Screen, WindowId};
 use dyetrace_core::image::Image;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::io;
 use std::path::Path;
 
@@ -41,11 +41,11 @@ impl Screen for FakeScreen {
     }
 }
 
-/// A pointer that remembers where it was put and how often it was clicked.
+/// A pointer that remembers where it was put and every click it was given.
 pub struct FakeMouse {
     x: Cell<i32>,
     y: Cell<i32>,
-    clicks: Cell<u32>,
+    clicks: RefCell<Vec<(i32, i32)>>,
     /// When false, [`Mouse::move_to`] reports failure, simulating a client that
     /// ignores injected movement.
     pub accepts_moves: bool,
@@ -56,13 +56,18 @@ impl FakeMouse {
         Self {
             x: Cell::new(x),
             y: Cell::new(y),
-            clicks: Cell::new(0),
+            clicks: RefCell::new(Vec::new()),
             accepts_moves: true,
         }
     }
 
-    pub fn clicks(&self) -> u32 {
-        self.clicks.get()
+    /// Where each click landed, in the order they were sent.
+    pub fn clicks(&self) -> Vec<(i32, i32)> {
+        self.clicks.borrow().clone()
+    }
+
+    pub fn click_count(&self) -> usize {
+        self.clicks.borrow().len()
     }
 }
 
@@ -81,7 +86,8 @@ impl Mouse for FakeMouse {
     }
 
     fn click(&self) {
-        self.clicks.set(self.clicks.get() + 1);
+        let pos = (self.x.get(), self.y.get());
+        self.clicks.borrow_mut().push(pos);
     }
 
     fn nudge(&self, dx: i32, dy: i32) {
@@ -89,5 +95,41 @@ impl Mouse for FakeMouse {
             self.x.set(self.x.get() + dx);
             self.y.set(self.y.get() + dy);
         }
+    }
+}
+
+/// A client window at a fixed place that counts how often it was raised.
+pub struct FakeWindow {
+    rect: Rect,
+    id: WindowId,
+    focus_calls: Cell<u32>,
+}
+
+impl FakeWindow {
+    pub fn new(rect: Rect) -> Self {
+        Self {
+            rect,
+            id: WindowId(1),
+            focus_calls: Cell::new(0),
+        }
+    }
+
+    pub fn focus_calls(&self) -> u32 {
+        self.focus_calls.get()
+    }
+}
+
+impl GameWindow for FakeWindow {
+    fn find(&self) -> Option<WindowId> {
+        Some(self.id)
+    }
+
+    fn rect(&self, _id: WindowId) -> Option<Rect> {
+        Some(self.rect)
+    }
+
+    fn focus(&self, _id: WindowId) -> bool {
+        self.focus_calls.set(self.focus_calls.get() + 1);
+        true
     }
 }

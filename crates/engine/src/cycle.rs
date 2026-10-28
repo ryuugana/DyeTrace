@@ -2,16 +2,17 @@
 //!
 //! A dye attempt is: park the pointer off the grid, grab the gradient (so the
 //! image has no legend in it), read the five sample offsets from the client's
-//! legend, then search.  The picker is armed with the client's Pick Color button
-//! only when the legend is not already showing, so a run never toggles a session
-//! it did not start.
+//! legend, then search.  Arming is the only part that presses buttons, and the
+//! legend decides when: no legend means no colour has been chosen, so Pick Color
+//! is safe to press; a live legend means the picker is already armed and the
+//! button reads "Start Dyeing", where Cancel is safe and Pick Color is not.
 //!
 //! Reading the client never raises it: the window is grabbed with
 //! `PrintWindow` when the backend supports it, so the interface stays visible
 //! and usable while a scan runs.
 
 use dyetrace_core::image::{Image, Rgb};
-use dyetrace_core::{markers, offsets, palette, search, CAP_H, CAP_W, MAX_TARGETS, MIN_SLOTS};
+use dyetrace_core::{label, markers, offsets, palette, search, CAP_H, CAP_W, MAX_TARGETS, MIN_SLOTS};
 use dyetrace_platform::traits::{GameWindow, Mouse, Rect, Screen, WindowId};
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +26,8 @@ const GRADIENT_WAIT: Duration = Duration::from_secs(4);
 const SETTLE: Duration = Duration::from_millis(320);
 /// How many times to nudge the pointer while waiting for the legend.
 const LEGEND_TRIES: usize = 4;
+/// How many Pick Color presses one attempt may make before giving up.
+const MAX_PRESSES: usize = 2;
 /// A grab below this percentage of saturated pixels is not a dye palette.
 const MIN_GRADIENT: u32 = 25;
 
@@ -136,6 +139,8 @@ pub enum ScanFail {
     Pointer,
     /// The picker was armed twice and never drew its legend.
     NoLegend,
+    /// The dye button's label could not be read, so nothing could be pressed.
+    ButtonUnknown,
 }
 
 struct Board {
@@ -171,6 +176,44 @@ fn palette_grab(frame: &Image, origin: (i32, i32)) -> Option<Image> {
     frame.sub_image(origin.0, origin.1, CAP_W, CAP_H)
 }
 
+/// Grab the palette, retrying briefly.
+///
+/// A capture taken immediately after a click can still show the frame before the
+/// redraw that the click caused - Pick Color rolls a new palette - so a single
+/// grab is not enough to judge whether the palette is there.
+fn settled_grab(
+    window: &dyn GameWindow,
+    screen: &dyn Screen,
+    id: WindowId,
+    origin: (i32, i32),
+    log: &mut dyn FnMut(&str),
+) -> Option<Image> {
+    for attempt in 0..8 {
+        if attempt > 0 {
+            sleep(Duration::from_millis(180));
+        }
+        match window_frame(window, screen, id) {
+            Some((_, frame)) => match palette_grab(&frame, origin) {
+                Some(crop) => {
+                    let pct = palette::gradient_percent(&crop);
+                    log(&format!("    grab {attempt}: gradient {pct}%"));
+                    if pct >= MIN_GRADIENT {
+                        return Some(crop);
+                    }
+                }
+                None => log(&format!(
+                    "    grab {attempt}: palette rect outside the {}x{} frame",
+                    frame.width(),
+                    frame.height()
+                )),
+            },
+            None => log(&format!("    grab {attempt}: window frame unavailable")),
+        }
+    }
+    log("    the palette did not settle after the click");
+    None
+}
+
 /// Wait until the palette is on screen and looks like a gradient.
 pub fn locate(
     window: &dyn GameWindow,
@@ -204,6 +247,30 @@ fn button(board: &Board, offset_x: i32, offset_y: i32) -> (i32, i32) {
     )
 }
 
+/// Where the pointer waits between clicks: clear of the grid and clear of both
+/// buttons, but still inside the dye form - a pointer left in the game world is
+/// taken over by the camera and wanders off on its own.
+const PARK_DX: i32 = 128;
+const PARK_DY: i32 = 300;
+
+/// Park the pointer, with a small nudge so the motion is real.
+///
+/// The client only redraws its legend, its button label and its hover highlight
+/// in response to pointer movement, so a pointer that is simply left in place
+/// leaves the last state on screen.
+fn park(mouse: &dyn Mouse, board: &Board) -> bool {
+    let (x, y) = button(board, PARK_DX, PARK_DY);
+    if !mouse.move_to(x, y) {
+        return false;
+    }
+    sleep(Duration::from_millis(180));
+    mouse.nudge(2, 1);
+    sleep(Duration::from_millis(60));
+    mouse.nudge(-2, -1);
+    sleep(Duration::from_millis(160));
+    true
+}
+
 fn pointer_on_palette(mouse: &dyn Mouse, board: &Board) -> (i32, i32) {
     let (px, py) = mouse.position();
     (
@@ -219,13 +286,21 @@ fn read_offsets(
     mouse: &dyn Mouse,
     id: WindowId,
     board: &Board,
+    log: &mut dyn FnMut(&str),
 ) -> Result<(Vec<(i32, i32)>, (i32, i32), Vec<(i32, i32)>), ScanFail> {
+    let mut best: Option<(Vec<(i32, i32)>, (i32, i32), Vec<(i32, i32)>)> = None;
+
     for attempt in 0..LEGEND_TRIES {
         if attempt == 0 {
             let (cx, cy) = button(board, CAP_W as i32 / 2, CAP_H as i32 / 2);
+            log(&format!(
+                "    move to ({cx},{cy}); rect ({},{}), origin ({},{})",
+                board.rect.x, board.rect.y, board.origin.0, board.origin.1
+            ));
             if !mouse.move_to(cx, cy) {
                 return Err(ScanFail::Pointer);
             }
+            log(&format!("    arrived at {:?}", mouse.position()));
         }
 
         // A move to the position it is already at produces no motion event, and
@@ -241,97 +316,129 @@ fn read_offsets(
         let live = palette_grab(&frame, board.origin).ok_or(ScanFail::Pointer)?;
 
         let boxes = markers::detect_boxes(&live, MAX_TARGETS);
+        log(&format!(
+            "    hover {attempt}: {} boxes, pointer ({},{})",
+            boxes.len(),
+            pointer.0,
+            pointer.1
+        ));
         if boxes.len() >= 2 {
             let table = offsets::from_boxes(&boxes, pointer);
-            return Ok((table, pointer, boxes));
+            // The client draws all five samples, but one can be clipped by the
+            // palette edge; a partial read is kept in case no better one comes,
+            // and a full one ends the wait at once.
+            if boxes.len() >= MIN_SLOTS {
+                return Ok((table, pointer, boxes));
+            }
+            if best
+                .as_ref()
+                .map(|(_, _, b)| boxes.len() > b.len())
+                .unwrap_or(true)
+            {
+                best = Some((table, pointer, boxes));
+            }
         }
     }
 
-    Err(ScanFail::NoLegend)
+    best.map_or(Err(ScanFail::NoLegend), Ok)
 }
 
 /// Park, grab, read the table — and arm the picker if it is not already armed.
+///
+/// The button's label decides what may be pressed, because the two faces are
+/// not interchangeable. White "Pick Color" arms the picker. Grey "Start Dyeing"
+/// means a colour has been chosen: pressing it applies the dye, and Cancel is
+/// the only safe click. Cancel while the label still says "Pick Color" closes
+/// the dye window - which is how an attempt was lost to a blind "reset" click.
+///
+/// So each press is gated on a fresh reading of the label, taken from the same
+/// grab the gradient comes from:
+///
+/// * "Pick Color" - press it once, then grab the new roll;
+/// * "Start Dyeing" - already armed, press nothing and grab what is there;
+/// * unreadable - press nothing and stop.
+///
+/// A press that leaves no legend behind is retried once, and only after the
+/// label has been read again and still says "Pick Color".
 fn prepare(
     window: &dyn GameWindow,
     screen: &dyn Screen,
     mouse: &dyn Mouse,
     id: WindowId,
     opts: &Options,
+    log: &mut dyn FnMut(&str),
 ) -> Result<Prepared, ScanFail> {
+    // Raise the client before the pointer goes anywhere near it: a background
+    // client draws no legend and receives no clicks, so the first attempt used
+    // to fail before the switch happened.
+    window.focus(id);
+
     let Some((rect, origin)) = locate(window, screen, id) else {
         return Err(ScanFail::NoGradient);
     };
     let board = Board { rect, origin };
     let button_row = button(&board, opts.pick_x, opts.button_y);
 
-    // Park off the grid so the grab has no legend in it.
-    if !mouse.move_to(button_row.0, button_row.1) {
+    // Park clear of both the grid and the buttons: the grab must not contain the
+    // legend, and a hovered button draws a highlight that hides its label.
+    if !park(mouse, &board) {
         return Err(ScanFail::Pointer);
     }
-    sleep(Duration::from_millis(160));
 
-    let mut grid = {
-        let (_, frame) = window_frame(window, screen, id).ok_or(ScanFail::Pointer)?;
-        palette_grab(&frame, origin).ok_or(ScanFail::NoGradient)?
-    };
-    if palette::gradient_percent(&grid) < MIN_GRADIENT {
-        return Err(ScanFail::NoGradient);
-    }
+    let mut presses = 0usize;
 
-    let mut armed = false;
+    loop {
+        let Some((_, frame)) = window_frame(window, screen, id) else {
+            return Err(ScanFail::NoGradient);
+        };
+        let label = label::read(&frame, origin);
+        log(&format!("    button reads {}", label.name()));
 
-    let (table, pointer, boxes) = match read_offsets(window, screen, mouse, id, &board) {
-        Ok(v) => v,
-        Err(ScanFail::NoLegend) => {
-            // Clicks land at screen coordinates: the client has to be in front
-            // for them to reach it rather than whatever window covers it.
-            window.focus(id);
-            armed = true;
-
-            // Reset first.  This button turns into "Start Dyeing" once a colour
-            // has been chosen, and pressing that applies the dye and closes the
-            // window.  Cancel brings the label back to "Pick Color" and keeps
-            // the window open, so pressing it first makes the next click safe.
-            let (cx, cy) = button(&board, opts.cancel_x, opts.button_y);
-            if !mouse.move_to(cx, cy) {
-                return Err(ScanFail::Pointer);
+        let grid = match label {
+            label::Label::PickColor => {
+                if presses >= MAX_PRESSES {
+                    log("    two presses and still no colour chosen - stopping");
+                    return Err(ScanFail::NoLegend);
+                }
+                if !mouse.move_to(button_row.0, button_row.1) {
+                    return Err(ScanFail::Pointer);
+                }
+                sleep(Duration::from_millis(200));
+                mouse.click();
+                presses += 1;
+                sleep(Duration::from_millis(420));
+                if opts.halted() {
+                    return Err(ScanFail::Pointer);
+                }
+                // Grab before the pointer goes onto the grid: the legend is drawn
+                // at the pointer, and the searched image must not contain it.
+                park(mouse, &board);
+                settled_grab(window, screen, id, origin, log).ok_or(ScanFail::NoGradient)?
             }
-            sleep(Duration::from_millis(150));
-            mouse.click();
-            sleep(Duration::from_millis(360));
-
-            if opts.halted() {
-                return Err(ScanFail::Pointer);
+            label::Label::StartDyeing => {
+                settled_grab(window, screen, id, origin, log).ok_or(ScanFail::NoGradient)?
             }
-
-            // One press only: a second press would be aimed at a button that may
-            // now read "Start Dyeing".
-            if !mouse.move_to(button_row.0, button_row.1) {
-                return Err(ScanFail::Pointer);
+            label::Label::Unknown => {
+                log("    the button label is unreadable - not pressing anything");
+                return Err(ScanFail::ButtonUnknown);
             }
-            sleep(Duration::from_millis(200));
-            mouse.click();
-            sleep(Duration::from_millis(420));
+        };
 
-            let (_, frame) = window_frame(window, screen, id).ok_or(ScanFail::Pointer)?;
-            grid = palette_grab(&frame, origin).ok_or(ScanFail::NoGradient)?;
-            if palette::gradient_percent(&grid) < MIN_GRADIENT {
-                return Err(ScanFail::NoGradient);
+        match read_offsets(window, screen, mouse, id, &board, log) {
+            Ok((table, pointer, boxes)) => {
+                return Ok(Prepared {
+                    board,
+                    grid,
+                    pointer,
+                    boxes,
+                    table,
+                    armed: presses > 0,
+                })
             }
-
-            read_offsets(window, screen, mouse, id, &board)?
+            Err(ScanFail::NoLegend) if label == label::Label::PickColor => continue,
+            Err(other) => return Err(other),
         }
-        Err(other) => return Err(other),
-    };
-
-    Ok(Prepared {
-        board,
-        grid,
-        pointer,
-        boxes,
-        table,
-        armed,
-    })
+    }
 }
 
 /// Prepare one search and report the best candidate, without clicking anything.
@@ -342,7 +449,7 @@ pub fn scan_once(
     opts: &Options,
 ) -> Result<Scan, ScanFail> {
     let id = window.find().ok_or(ScanFail::NoClient)?;
-    let prep = prepare(window, screen, mouse, id, opts)?;
+    let prep = prepare(window, screen, mouse, id, opts, &mut |_: &str| {})?;
     let best = search::search(&prep.grid, &prep.table, opts.colour, opts.variance);
 
     Ok(Scan {
@@ -355,6 +462,47 @@ pub fn scan_once(
         best,
         armed: prep.armed,
     })
+}
+
+/// Discard the chosen colour, and confirm that the client took the click.
+///
+/// Cancel is only safe while the button reads "Start Dyeing", which `prepare`
+/// has just established from the legend.  The click is repeated once because a
+/// click sent the instant the pointer lands is sometimes swallowed; the label is
+/// read back after each try, and a button that still reads "Start Dyeing" means
+/// the colour is still chosen.
+fn cancel_roll(
+    window: &dyn GameWindow,
+    screen: &dyn Screen,
+    mouse: &dyn Mouse,
+    id: WindowId,
+    board: &Board,
+    opts: &Options,
+    log: &mut dyn FnMut(&str),
+) -> bool {
+    for _ in 0..2 {
+        let (cx, cy) = button(board, opts.cancel_x, opts.button_y);
+        if !mouse.move_to(cx, cy) {
+            return false;
+        }
+        // Let the client register the hover before the button press.
+        sleep(Duration::from_millis(220));
+        mouse.click();
+        sleep(SETTLE);
+        if opts.halted() {
+            return false;
+        }
+
+        let Some((_, frame)) = window_frame(window, screen, id) else {
+            return false;
+        };
+        let label = label::read(&frame, board.origin);
+        log(&format!("    after cancel the button reads {}", label.name()));
+        if label != label::Label::StartDyeing {
+            return true;
+        }
+    }
+    false
 }
 
 /// Run the full cycle until a match is clicked, the colour runs out, or the
@@ -371,6 +519,12 @@ pub fn run(
         return Outcome::NoClient;
     };
 
+    // Switch to the client before looking for anything. Its palette is drawn on
+    // its own window, so starting from a background window only burned a full
+    // locate timeout before the switch that was going to happen anyway.
+    report("  switching to the client");
+    window.focus(id);
+
     if locate(window, screen, id).is_none() {
         report("no gradient - open the dye window and leave it visible");
         return Outcome::NoClient;
@@ -385,7 +539,7 @@ pub fn run(
         }
         cycles += 1;
 
-        let prep = match prepare(window, screen, mouse, id, opts) {
+        let prep = match prepare(window, screen, mouse, id, opts, &mut |line: &str| report(line)) {
             Ok(p) => p,
             Err(ScanFail::NoGradient) => {
                 report(&format!("cycle {cycles}: the dye window is gone - stopping"));
@@ -402,10 +556,16 @@ pub fn run(
                 ));
                 return Outcome::NoClient;
             }
+            Err(ScanFail::ButtonUnknown) => {
+                report(&format!(
+                    "cycle {cycles}: cannot read the dye button - stopping without pressing it"
+                ));
+                return Outcome::NoClient;
+            }
         };
 
         if prep.armed {
-            report("  picker was not armed - clicked Pick Color");
+            report("  pressed Pick Color to arm the picker");
         }
         report(&format!(
             "cycle {cycles}: {} slots (pointer {},{})",
@@ -450,13 +610,17 @@ pub fn run(
             }
         }
 
-        report("  not enough samples - cancelling");
+        // Reaching here means the legend was live, so the button reads "Start
+        // Dyeing": Cancel discards the colour and rolls a new one, which is the
+        // only state in which that click is safe.
+        report("  no place holds enough of the colour - cancelling");
         window.focus(id);
-        let (cx, cy) = button(&prep.board, opts.cancel_x, opts.button_y);
-        if mouse.move_to(cx, cy) {
-            mouse.click();
+        if !cancel_roll(window, screen, mouse, id, &prep.board, opts, &mut |line: &str| {
+            report(line)
+        }) {
+            report("  the cancel click did not take - stopping");
+            return Outcome::Exhausted { cycles };
         }
-        sleep(SETTLE);
     }
 
     Outcome::Exhausted { cycles }

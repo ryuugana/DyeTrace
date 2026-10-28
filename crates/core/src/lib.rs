@@ -15,6 +15,7 @@
 
 pub mod colour;
 pub mod image;
+pub mod label;
 pub mod markers;
 pub mod offsets;
 pub mod palette;

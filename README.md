@@ -20,7 +20,7 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - **Reads the five sample offsets from the client itself** every attempt, instead of assuming a fixed spacing. The offsets are not universal — they depend on the dye/part set.
 - **Matches by count, not by slot order.** You give one colour, a variance, and how many of the five samples must hold it (1–5).
 - **Shows a hit map** — a white pane with red where the colour exists, the same view the original presents, plus boxes at the sampled positions.
-- **Auto mode** runs the whole cycle: `Pick Color` → capture → read offsets → search → click, or `Cancel` and try again.
+- **Auto mode** runs the whole cycle: `Pick Color` → capture → read offsets → search → click, or `Cancel` and try again. Presses are gated on the button's label, so a dye is never applied by accident.
 - **Stops on demand** with the spacebar or the Stop button.
 - **Self-tests** (`--selftest`) so you can check a build without opening the game.
 
@@ -92,13 +92,20 @@ use them:
 
 | Button state | What happens |
 |---|---|
-| **Pick Color** | Puts the window into picking mode. This is the only state in which the tool may press it. |
-| **Start Dyeing** | Appears once a colour has been chosen. Pressing it applies the dye and closes the window. |
-| **Cancel** | Discards the chosen colour and **brings the Pick Color label back**, leaving the window open. |
+| **Pick Color** | White label. Puts the window into picking mode and rolls a new gradient. This is the only state in which the tool may press it. |
+| **Start Dyeing** | Grey label, shown as soon as a colour has been picked. Pressing it applies the dye and closes the window. |
+| **Cancel** | Discards the chosen colour and **brings the Pick Color label back**, leaving the window open - but only while the label reads Start Dyeing. Pressed while the window is idle it closes the dye window instead. |
 
-That is why arming a cycle always cancels first and then presses the button
-once: cancel restores the label, so the press cannot land on Start Dyeing, and
-one press cannot accidentally turn into a second one.
+A click is therefore never sent blind. DyeTrace reads the label out of the same
+grab the gradient comes from - the white label has about forty pixels brighter
+than luminance 130 and the grey one none - and acts on what it says:
+
+- **Pick Color** - press it once, then capture the new gradient;
+- **Start Dyeing** - press nothing, the pick is already armed;
+- **unreadable** - press nothing and stop, rather than guess.
+
+Auto raises the client before it looks for anything, and every Cancel is
+confirmed by reading the label back.
 
 The legacy GUI (`legacy\c-reference`) has the field table below.
 
@@ -117,7 +124,7 @@ The legacy GUI (`legacy\c-reference`) has the field table below.
 ## How it works
 
 1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain.
-2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics.
+2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics. The cursor waits below the palette in between, where the client's camera cannot take it.
 3. **Read the sample offsets.** Hovering the grid makes the client draw five markers. Each marker is a **crosshair** (the sample point) joined by a short neck to a **legend box** that shows the colour found there; the box sits 10 px to the right of its crosshair. Measured on every box: `box_fill == gradient[box_centre + (-10, 0)]`, exactly. The pointer's own slot is `(0,0)`.
 4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance.
 5. **Act.** Move the cursor to the match and click — or click `Cancel` and start over.
@@ -147,6 +154,7 @@ anything, which makes it the safe way to check a C build.
 | `no gradient - open the dye window and leave it visible` | The palette is not on screen, or the client is behind another window. Open the dye window and keep it visible. |
 | `move this window off the palette - it is covering the colours` | DyeTrace is overlapping the gradient; move it aside. |
 | Auto keeps cancelling | The `btn x/y` offsets are not hitting Pick Color / Cancel on your layout. Check them with a screenshot. |
+| The dye window closed itself | A Cancel click landed while the button still read Pick Color. Current builds read the label first and only press Cancel when it reads Start Dyeing; if you see this, report the log lines beginning `button reads`. |
 | Nothing gets clicked | The client ignores `SetCursorPos` for its hover state; DyeTrace also injects real mouse movement. If the cursor cannot be placed, the status says `auto: cursor did not reach the match - cycle aborted` and the cycle stops rather than clicking blind. |
 | Wrong spot gets picked | Loosen or tighten `variance`, or change `slots`. Compare against the red hit map — it shows exactly what the search sees. |
 

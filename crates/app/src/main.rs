@@ -6,6 +6,7 @@
 //! `--probe` runs the Windows backend against the live client.
 
 mod auto;
+mod mouse_test;
 mod probe;
 mod snapshot;
 mod window_capture;
@@ -26,6 +27,7 @@ fn main() {
         Some("--probe") => probe::run(&args[1..]),
         Some("--snapshot") => snapshot::run(&args[1..]),
         Some("--snapshot-window") => window_capture::run(&args[1..]),
+        Some("--mouse-test") => mouse_test::run(&args[1..]),
         Some("--auto") => auto::run(&args[1..]),
         _ => {
             usage();

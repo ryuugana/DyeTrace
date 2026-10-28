@@ -184,6 +184,7 @@ fn fail_text(err: cycle::ScanFail) -> String {
         cycle::ScanFail::NoGradient => "no palette - is the dye window open?".to_string(),
         cycle::ScanFail::Pointer => "the pointer could not be placed".to_string(),
         cycle::ScanFail::NoLegend => "the client never drew its sample squares - reopen the dye window".to_string(),
+        cycle::ScanFail::ButtonUnknown => "cannot read the dye button - leaving it alone".to_string(),
     }
 }
 
