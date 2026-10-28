@@ -1,6 +1,6 @@
 //! `--auto`: run the cycle against the live client.
 
-use crate::cycle::{self, Options};
+use dyetrace_engine::cycle::{self, Options};
 use dyetrace_core::image::Rgb;
 
 pub fn parse(args: &[String]) -> Result<Options, String> {
@@ -91,6 +91,7 @@ pub fn run(args: &[String]) -> i32 {
         &WinScreen::new(),
         &WinMouse::new(),
         &opts,
+        |line| println!("{line}"),
     );
 
     println!();

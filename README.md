@@ -4,6 +4,8 @@
 
 Windows · C (Win32) · single 32-bit executable · no runtime dependencies
 
+![DyeTrace scanning a dye palette](docs/captures/ui.png)
+
 ---
 
 ## Why this exists
@@ -28,6 +30,8 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - `crates/platform` - the `Screen` / `Mouse` / `GameWindow` traits, plus BMP replay fakes so the pipeline runs without a client
 - `crates/platform-win` - the Win32 backend (`BitBlt`, verified pointer moves, window focus)
 - `crates/app` - the CLI: `--selftest`, `--replay`, `--probe`, `--snapshot`, `--auto`
+- `crates/engine` - the dye cycle itself, shared by the CLI and the window
+- `crates/ui` - the windowed interface (egui): colour picker, presets, hit map
 - `legacy/c-reference` - the single-file C reference implementation (`dyetrace.c`, `build.bat`) that the Rust port was verified against
 
 ## Requirements
@@ -41,7 +45,8 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 The Rust implementation (recommended):
 
 ```bat
-cargo build --release     :: target\release\dyetrace.exe
+cargo build --release     :: target\release\dyetrace.exe     (CLI)
+                          :: target\release\dyetrace-ui.exe  (window)
 cargo test                :: behaviour checks + offset/search/backend tests
 ```
 
@@ -61,9 +66,26 @@ cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
 
 ## Usage
 
-The table below describes the reference GUI (`legacy\c-reference`).  The Rust build exposes the same three settings as `--colour`, `--variance` and `--slots`; its windowed UI is the next piece of work.
+`dyetrace-ui.exe` is the window: a colour on the left, a search preview in the
+middle, and a picker on the right.
 
-Open the dye window in game, then start `dyetrace.exe`:
+| Control | Meaning |
+|---|---|
+| `Selected colour` / `Save as…` | Named colours, stored in `presets.txt` next to the executable. |
+| `R` `G` `B`, `Hex` | The dye colour. All three stay in sync with the picker. |
+| Colour square + hue strip | Pick the colour visually; the marker follows the current one. |
+| `Dye spots` | How many of the five samples must hold the colour (1–5). Which sample holds it does not matter. |
+| `Variance ±` | Per-channel tolerance. `0` = exact match. |
+| `Find field` | Locate the palette and report where it is. |
+| `Scan` | Read the client's sample offsets, search, and draw the hit map. Nothing is clicked except Pick Color, and only if the picker is not already armed. |
+| `Auto` | Run the cycle until it clicks a match, or Stop. |
+| `Advanced` | Tab reserved for offsets, timings and per-slot colours. |
+
+The preview is the same view the original presents: white with red where the
+colour exists, blue squares for the client's legend, grey points for the five
+samples and a green crosshair on the best position.
+
+The legacy GUI (`legacy\c-reference`) has the field table below.
 
 | Field | Meaning |
 |---|---|

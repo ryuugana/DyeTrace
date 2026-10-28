@@ -22,6 +22,13 @@ pub trait Screen {
 
     /// Grab a rectangle.  Returns `None` if it is not fully on screen.
     fn capture(&self, x: i32, y: i32, w: u32, h: u32) -> Option<Image>;
+
+    /// Grab a whole window even when it is partly covered, so reading a client
+    /// does not require raising it.  Backends without such a call return `None`
+    /// and callers fall back to [`Screen::capture`].
+    fn capture_window(&self, _id: WindowId) -> Option<Image> {
+        None
+    }
 }
 
 /// Moves and clicks the pointer.

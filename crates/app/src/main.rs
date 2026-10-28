@@ -6,9 +6,9 @@
 //! `--probe` runs the Windows backend against the live client.
 
 mod auto;
-mod cycle;
 mod probe;
 mod snapshot;
+mod window_capture;
 
 use dyetrace_core::image::Rgb;
 use dyetrace_core::{markers, offsets, palette, search, selftest, MAX_TARGETS};
@@ -25,6 +25,7 @@ fn main() {
         Some("--replay") => run_replay(&args[1..]),
         Some("--probe") => probe::run(&args[1..]),
         Some("--snapshot") => snapshot::run(&args[1..]),
+        Some("--snapshot-window") => window_capture::run(&args[1..]),
         Some("--auto") => auto::run(&args[1..]),
         _ => {
             usage();

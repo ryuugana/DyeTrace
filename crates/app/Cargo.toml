@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 dyetrace-core = { path = "../core" }
+dyetrace-engine = { path = "../engine" }
 dyetrace-platform = { path = "../platform" }
 
 [target.'cfg(windows)'.dependencies]

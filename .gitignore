@@ -16,5 +16,8 @@ probe.txt
 autotest.txt
 hover.bmp
 dt_*.bmp
+!docs/captures/*.png
 probe_out*/
 *.png
+*.bmp
+!docs/captures/*.png

@@ -70,14 +70,13 @@ impl GameWindow for WinWindow {
         }
     }
 
-    /// Best effort, and deliberately cheap.
+    /// Raise the client so clicks sent at screen coordinates reach it.
     ///
-    /// `SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT)` is the usual way to
-    /// force a foreground switch, but it broadcasts a setting change and waits
-    /// for every top-level window to process it - a busy game client can block
-    /// it indefinitely, which hangs the caller.  Clicks are sent to whatever is
-    /// under the pointer anyway and give the client focus as a side effect, so
-    /// a plain `SetForegroundWindow` is enough here.
+    /// A background process is not allowed to call `SetForegroundWindow`
+    /// successfully, so `SwitchToThisWindow` is the fallback: it is exported by
+    /// user32, needs no foreground rights, and unlike
+    /// `SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT)` it does not
+    /// broadcast a setting change that a busy client can block on.
     fn focus(&self, id: WindowId) -> bool {
         let hwnd = id.0 as ffi::HWND;
 
@@ -85,7 +84,14 @@ impl GameWindow for WinWindow {
             if ffi::GetForegroundWindow() == hwnd {
                 return true;
             }
+
             ffi::SetForegroundWindow(hwnd);
+            sleep(Duration::from_millis(80));
+            if ffi::GetForegroundWindow() == hwnd {
+                return true;
+            }
+
+            ffi::SwitchToThisWindow(hwnd, 1);
             sleep(self.focus_delay);
             ffi::GetForegroundWindow() == hwnd
         }

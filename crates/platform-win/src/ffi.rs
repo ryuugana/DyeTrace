@@ -91,9 +91,11 @@ extern "system" {
     pub fn mouse_event(flags: u32, dx: u32, dy: u32, data: u32, extra: usize);
 
     pub fn FindWindowA(class: *const u8, title: *const u8) -> HWND;
+    pub fn PrintWindow(hwnd: HWND, hdc: HDC, flags: u32) -> BOOL;
     pub fn IsWindow(hwnd: HWND) -> BOOL;
     pub fn GetWindowRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
     pub fn SetForegroundWindow(hwnd: HWND) -> BOOL;
+    pub fn SwitchToThisWindow(hwnd: HWND, alt_tab: BOOL);
     pub fn GetForegroundWindow() -> HWND;
 
     pub fn GetSystemMetrics(index: i32) -> i32;
