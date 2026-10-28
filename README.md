@@ -28,14 +28,7 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - `crates/platform` - the `Screen` / `Mouse` / `GameWindow` traits, plus BMP replay fakes so the pipeline runs without a client
 - `crates/platform-win` - the Win32 backend (`BitBlt`, verified pointer moves, window focus)
 - `crates/app` - the CLI: `--selftest`, `--replay`, `--probe`, `--snapshot`, `--auto`
-- `dyetrace.c`, `build.bat` - the single-file C reference implementation that the Rust port was verified against
-
-Building the Rust version needs only a Rust toolchain:
-
-```bat
-cargo build --release     :: target\release\dyetrace.exe
-cargo test                :: behaviour checks + offset/search/backend tests
-```
+- `legacy/c-reference` - the single-file C reference implementation (`dyetrace.c`, `build.bat`) that the Rust port was verified against
 
 ## Requirements
 
@@ -45,13 +38,21 @@ cargo test                :: behaviour checks + offset/search/backend tests
 
 ## Build
 
-From this folder:
+The Rust implementation (recommended):
 
 ```bat
+cargo build --release     :: target\release\dyetrace.exe
+cargo test                :: behaviour checks + offset/search/backend tests
+```
+
+The C reference, kept for parity work (needs MSVC):
+
+```bat
+cd legacy\c-reference
 build.bat
 ```
 
-Or directly with MSVC:
+or directly:
 
 ```bat
 cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
@@ -59,6 +60,8 @@ cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
 ```
 
 ## Usage
+
+The table below describes the reference GUI (`legacy\c-reference`).  The Rust build exposes the same three settings as `--colour`, `--variance` and `--slots`; its windowed UI is the next piece of work.
 
 Open the dye window in game, then start `dyetrace.exe`:
 
@@ -84,14 +87,21 @@ Open the dye window in game, then start `dyetrace.exe`:
 
 ## Command line
 
+The Rust build (`target\release\dyetrace.exe`):
+
 ```bat
-dyetrace.exe              :: GUI
-dyetrace.exe --selftest   :: 12 checks, writes selftest.txt
-dyetrace.exe --probe      :: locate the palette and dump BMPs + probe.txt
-dyetrace.exe --autotest   :: run the Auto cycle but never click the gradient
+dyetrace --selftest                      :: the twelve behaviour checks -> selftest.txt
+dyetrace --auto --colour 000000 --slots 3 :: run the dye cycle on the live client
+dyetrace --auto --dry-run                 :: same, but never click the gradient
+dyetrace --probe --out DIR                :: locate the palette, write window/palette BMPs
+dyetrace --replay <clean.bmp> [<hover.bmp>] :: run the pipeline against saved frames
+dyetrace --snapshot <out.bmp>             :: capture the primary screen
 ```
 
-`--autotest` is the safe way to check a new build: it drives the whole cycle, writes `autotest.txt`, and re-rolls the dye colours (Pick Color) but never applies anything.
+The C reference (`legacy\c-reference`) keeps its GUI plus `--selftest`, `--probe`
+and `--autotest`.  `--autotest` there drives the whole cycle, writes
+`autotest.txt`, and re-rolls the dye colours (Pick Color) but never applies
+anything, which makes it the safe way to check a C build.
 
 ## Troubleshooting
 
