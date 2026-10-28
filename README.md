@@ -22,6 +22,21 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - **Stops on demand** with the spacebar or the Stop button.
 - **Self-tests** (`--selftest`) so you can check a build without opening the game.
 
+## Repository layout
+
+- `crates/core` - platform-free matching: palette detection, legend offsets, the search, and the twelve behaviour checks as tests
+- `crates/platform` - the `Screen` / `Mouse` / `GameWindow` traits, plus BMP replay fakes so the pipeline runs without a client
+- `crates/platform-win` - the Win32 backend (`BitBlt`, verified pointer moves, window focus)
+- `crates/app` - the CLI: `--selftest`, `--replay`, `--probe`, `--snapshot`, `--auto`
+- `dyetrace.c`, `build.bat` - the single-file C reference implementation that the Rust port was verified against
+
+Building the Rust version needs only a Rust toolchain:
+
+```bat
+cargo build --release     :: target\release\dyetrace.exe
+cargo test                :: behaviour checks + offset/search/backend tests
+```
+
 ## Requirements
 
 - Windows (the binary is x86; it runs fine on 64-bit Windows).
