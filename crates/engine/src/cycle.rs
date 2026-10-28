@@ -27,8 +27,6 @@ const SETTLE: Duration = Duration::from_millis(320);
 const LEGEND_TRIES: usize = 4;
 /// A grab below this percentage of saturated pixels is not a dye palette.
 const MIN_GRADIENT: u32 = 25;
-/// How many failed arming attempts before deciding the dye window is not open.
-pub const ARM_TRIES: usize = 3;
 
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -289,32 +287,39 @@ fn prepare(
             // for them to reach it rather than whatever window covers it.
             window.focus(id);
             armed = true;
-            let mut last = Err(ScanFail::NoLegend);
-            for _ in 0..ARM_TRIES {
-                if opts.halted() {
-                    return Err(ScanFail::Pointer);
-                }
-                window.focus(id);
-                if !mouse.move_to(button_row.0, button_row.1) {
-                    return Err(ScanFail::Pointer);
-                }
-                // let the client register the pointer sitting on the button
-                sleep(Duration::from_millis(200));
-                mouse.click();
-                sleep(Duration::from_millis(420));
 
-                let (_, frame) = window_frame(window, screen, id).ok_or(ScanFail::Pointer)?;
-                grid = palette_grab(&frame, origin).ok_or(ScanFail::NoGradient)?;
-                if palette::gradient_percent(&grid) < MIN_GRADIENT {
-                    return Err(ScanFail::NoGradient);
-                }
-
-                last = read_offsets(window, screen, mouse, id, &board);
-                if last.is_ok() {
-                    break;
-                }
+            // Reset first.  This button turns into "Start Dyeing" once a colour
+            // has been chosen, and pressing that applies the dye and closes the
+            // window.  Cancel brings the label back to "Pick Color" and keeps
+            // the window open, so pressing it first makes the next click safe.
+            let (cx, cy) = button(&board, opts.cancel_x, opts.button_y);
+            if !mouse.move_to(cx, cy) {
+                return Err(ScanFail::Pointer);
             }
-            last?
+            sleep(Duration::from_millis(150));
+            mouse.click();
+            sleep(Duration::from_millis(360));
+
+            if opts.halted() {
+                return Err(ScanFail::Pointer);
+            }
+
+            // One press only: a second press would be aimed at a button that may
+            // now read "Start Dyeing".
+            if !mouse.move_to(button_row.0, button_row.1) {
+                return Err(ScanFail::Pointer);
+            }
+            sleep(Duration::from_millis(200));
+            mouse.click();
+            sleep(Duration::from_millis(420));
+
+            let (_, frame) = window_frame(window, screen, id).ok_or(ScanFail::Pointer)?;
+            grid = palette_grab(&frame, origin).ok_or(ScanFail::NoGradient)?;
+            if palette::gradient_percent(&grid) < MIN_GRADIENT {
+                return Err(ScanFail::NoGradient);
+            }
+
+            read_offsets(window, screen, mouse, id, &board)?
         }
         Err(other) => return Err(other),
     };

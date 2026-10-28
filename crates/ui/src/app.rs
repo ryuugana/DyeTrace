@@ -273,12 +273,12 @@ impl DyeTraceApp {
 
     fn picker_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Colour").strong());
-        let width = ui.available_width().min(300.0);
+        let width = ui.available_width().min(120.0);
 
         let mut changed = picker::saturation_value_square(
             ui,
             &mut self.textures,
-            Vec2::new(width, width * 0.33),
+            Vec2::new(width, width),
             &mut self.hue,
             &mut self.saturation,
             &mut self.value,
@@ -441,7 +441,7 @@ impl eframe::App for DyeTraceApp {
                     self.controls(ui);
 
                     // Keep the picker at the bottom of the column.
-                    let keep = 168.0;
+                    let keep = 190.0;
                     let slack = (ui.available_height() - keep).max(0.0);
                     ui.add_space(slack);
                     self.picker_panel(ui);
