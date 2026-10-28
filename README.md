@@ -85,6 +85,21 @@ The preview is the same view the original presents: white with red where the
 colour exists, blue squares for the client's legend, grey points for the five
 samples and a green crosshair on the best position.
 
+### The dye window's buttons
+
+The bottom row of the dye window has two buttons whose meaning changes as you
+use them:
+
+| Button state | What happens |
+|---|---|
+| **Pick Color** | Puts the window into picking mode. This is the only state in which the tool may press it. |
+| **Start Dyeing** | Appears once a colour has been chosen. Pressing it applies the dye and closes the window. |
+| **Cancel** | Discards the chosen colour and **brings the Pick Color label back**, leaving the window open. |
+
+That is why arming a cycle always cancels first and then presses the button
+once: cancel restores the label, so the press cannot land on Start Dyeing, and
+one press cannot accidentally turn into a second one.
+
 The legacy GUI (`legacy\c-reference`) has the field table below.
 
 | Field | Meaning |
