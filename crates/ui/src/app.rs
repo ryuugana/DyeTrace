@@ -273,12 +273,12 @@ impl DyeTraceApp {
 
     fn picker_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Colour").strong());
-        let width = ui.available_width().min(240.0);
+        let width = ui.available_width().min(300.0);
 
         let mut changed = picker::saturation_value_square(
             ui,
             &mut self.textures,
-            Vec2::new(width, width * 0.72),
+            Vec2::new(width, width * 0.33),
             &mut self.hue,
             &mut self.saturation,
             &mut self.value,
@@ -288,7 +288,7 @@ impl DyeTraceApp {
         changed |= picker::hue_strip(
             ui,
             &mut self.textures,
-            Vec2::new(width, 16.0),
+            Vec2::new(width, 14.0),
             &mut self.hue,
         );
 
@@ -298,15 +298,8 @@ impl DyeTraceApp {
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            picker::swatch(ui, Vec2::new(48.0, 28.0), self.colour);
-            ui.vertical(|ui| {
-                ui.label(format!("#{}", worker::hex(self.colour)));
-                ui.label(
-                    RichText::new(format!("{}, {}, {}", self.colour.r, self.colour.g, self.colour.b))
-                        .weak()
-                        .small(),
-                );
-            });
+            picker::swatch(ui, Vec2::new(48.0, 24.0), self.colour);
+            ui.label(format!("#{}", worker::hex(self.colour)));
         });
     }
 
@@ -443,13 +436,16 @@ impl eframe::App for DyeTraceApp {
         if self.tab == Tab::Dye {
             egui::SidePanel::left("controls")
                 .resizable(false)
-                .exact_width(320.0)
-                .show(ctx, |ui| self.controls(ui));
+                .exact_width(310.0)
+                .show(ctx, |ui| {
+                    self.controls(ui);
 
-            egui::SidePanel::right("picker")
-                .resizable(false)
-                .exact_width(252.0)
-                .show(ctx, |ui| self.picker_panel(ui));
+                    // Keep the picker at the bottom of the column.
+                    let keep = 168.0;
+                    let slack = (ui.available_height() - keep).max(0.0);
+                    ui.add_space(slack);
+                    self.picker_panel(ui);
+                });
 
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| self.preview_panel(ui));
