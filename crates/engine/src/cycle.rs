@@ -28,7 +28,7 @@ const LEGEND_TRIES: usize = 4;
 /// A grab below this percentage of saturated pixels is not a dye palette.
 const MIN_GRADIENT: u32 = 25;
 /// How many failed arming attempts before deciding the dye window is not open.
-pub const ARM_TRIES: usize = 2;
+pub const ARM_TRIES: usize = 3;
 
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -294,11 +294,14 @@ fn prepare(
                 if opts.halted() {
                     return Err(ScanFail::Pointer);
                 }
+                window.focus(id);
                 if !mouse.move_to(button_row.0, button_row.1) {
                     return Err(ScanFail::Pointer);
                 }
+                // let the client register the pointer sitting on the button
+                sleep(Duration::from_millis(200));
                 mouse.click();
-                sleep(Duration::from_millis(300));
+                sleep(Duration::from_millis(420));
 
                 let (_, frame) = window_frame(window, screen, id).ok_or(ScanFail::Pointer)?;
                 grid = palette_grab(&frame, origin).ok_or(ScanFail::NoGradient)?;
@@ -396,6 +399,9 @@ pub fn run(
             }
         };
 
+        if prep.armed {
+            report("  picker was not armed - clicked Pick Color");
+        }
         report(&format!(
             "cycle {cycles}: {} slots (pointer {},{})",
             prep.table.len(),

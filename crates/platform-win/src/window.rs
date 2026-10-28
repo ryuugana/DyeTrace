@@ -88,6 +88,9 @@ impl GameWindow for WinWindow {
             ffi::SetForegroundWindow(hwnd);
             sleep(Duration::from_millis(80));
             if ffi::GetForegroundWindow() == hwnd {
+                // The click that activates a window is often swallowed, so give
+                // activation its own settle before the caller clicks.
+                sleep(self.focus_delay);
                 return true;
             }
 
