@@ -112,20 +112,23 @@ pub fn search(grid: &Image, offsets: &[(i32, i32)], want: Rgb, tolerance: u8) ->
 /// What a search should ask for: one colour per sample, and how many of them
 /// must hold it.
 ///
-/// A chosen sample takes priority over the count - only that one is asked for
-/// the colour, and one hit is enough.  Without a choice every sample is asked,
-/// and `slots` of them must match.  An index the table does not have is ignored
-/// rather than treated as a miss.
+/// Chosen samples take priority over the count - only they are asked for the
+/// colour, and every one of them must match.  Without a choice every sample is
+/// asked, and `slots` of them must match.  An index the table does not have is
+/// ignored rather than treated as a miss.
 pub fn plan(
     len: usize,
     want: Rgb,
     slots: usize,
-    prefer: Option<usize>,
+    only: &[usize],
 ) -> (Vec<Option<Rgb>>, usize) {
-    if let Some(index) = prefer.filter(|index| *index < len) {
+    let chosen: Vec<usize> = only.iter().copied().filter(|index| *index < len).collect();
+    if !chosen.is_empty() {
         let mut colours = vec![None; len];
-        colours[index] = Some(want);
-        return (colours, 1);
+        for index in &chosen {
+            colours[*index] = Some(want);
+        }
+        return (colours, chosen.len());
     }
     let need = slots.clamp(1, len.max(1));
     (vec![Some(want); len], need)

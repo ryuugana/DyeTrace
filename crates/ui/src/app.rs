@@ -26,8 +26,9 @@ pub struct DyeTraceApp {
 
     slots: usize,
     variance: u8,
-    /// Which of the five samples must hold the colour; `None` uses `slots`.
-    prefer: Option<usize>,
+    /// Slots that must hold the colour, numbered as the dye window does.  Empty
+    /// falls back to `slots`.
+    slots_only: Vec<usize>,
 
     presets: Presets,
     save_name: String,
@@ -58,7 +59,7 @@ impl DyeTraceApp {
             value: 0.0,
             slots: 1,
             variance: 0,
-            prefer: None,
+            slots_only: Vec::new(),
             presets: Presets::load(),
             save_name: String::new(),
             textures: PickerTextures::default(),
@@ -97,7 +98,7 @@ impl DyeTraceApp {
             colour: self.colour,
             variance: self.variance,
             slots: self.slots,
-            prefer: self.prefer,
+            slots_only: self.slots_only.clone(),
             dry_run,
             stop: self.worker.stop_flag(),
             ..Options::default()
@@ -303,20 +304,26 @@ impl DyeTraceApp {
         });
     }
 
-    /// Slot preference, dye spots and variance, sitting beside the picker.
+    /// Slot selection, dye spots and variance, sitting beside the picker.
     fn match_controls(&mut self, ui: &mut egui::Ui) {
         ui.label("Slot");
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
-            let mut chosen = self.prefer;
+            let mut chosen = self.slots_only.clone();
             for n in 1..=5usize {
-                let selected = self.prefer == Some(n - 1);
+                let slot = n - 1;
+                let selected = chosen.contains(&slot);
                 let button = egui::Button::new(format!("{n}")).selected(selected);
                 if ui.add_sized([22.0, 20.0], button).clicked() {
-                    chosen = if selected { None } else { Some(n - 1) };
+                    if selected {
+                        chosen.retain(|picked| *picked != slot);
+                    } else {
+                        chosen.push(slot);
+                        chosen.sort();
+                    }
                 }
             }
-            self.prefer = chosen;
+            self.slots_only = chosen;
         });
 
         ui.add_space(8.0);
@@ -396,7 +403,7 @@ impl DyeTraceApp {
             if !rect.contains(point) {
                 continue;
             }
-            let chosen = self.prefer == Some(slot);
+            let chosen = self.slots_only.contains(&slot);
             let colour = if chosen {
                 Color32::from_rgb(20, 90, 220)
             } else {

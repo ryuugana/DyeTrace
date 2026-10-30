@@ -32,11 +32,21 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 i += 2;
             }
             "--slot" => {
-                let n: usize = value("--slot")?.parse().map_err(|_| "--slot needs 1-5")?;
-                if !(1..=dyetrace_core::MAX_TARGETS).contains(&n) {
-                    return Err("--slot needs 1-5".to_string());
+                // Repeatable, and commas are allowed: --slot 1 --slot 3,5
+                let text = value("--slot")?;
+                for piece in text.split(',') {
+                    let n: usize = piece
+                        .trim()
+                        .parse()
+                        .map_err(|_| "--slot needs 1-5")?;
+                    if !(1..=dyetrace_core::MAX_TARGETS).contains(&n) {
+                        return Err("--slot needs 1-5".to_string());
+                    }
+                    if !opts.slots_only.contains(&(n - 1)) {
+                        opts.slots_only.push(n - 1);
+                    }
                 }
-                opts.prefer = Some(n - 1);
+                opts.slots_only.sort();
                 i += 2;
             }
             "--cycles" => {
@@ -112,9 +122,10 @@ pub fn run(args: &[String]) -> i32 {
             samples,
             clicked,
         } => {
-            let what = match opts.prefer {
-                Some(index) => format!("slot {} holds", index + 1),
-                None => format!("{count}/{samples} samples hold"),
+            let what = if opts.slots_only.is_empty() {
+                format!("{count}/{samples} samples hold")
+            } else {
+                cycle::slot_phrase(&opts.slots_only)
             };
             println!(
                 "{} ({x},{y}) after {cycles} cycle(s): {what} #{}",

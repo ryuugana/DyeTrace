@@ -124,23 +124,21 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
             match cycle::scan_once(&window, &screen, &mouse, &opts) {
                 Ok(scan) => {
                     let mut summary = match scan.best {
-                        Some(best) => match opts.prefer {
-                            Some(index) => format!(
-                                "best ({},{}) - slot {} holds #{}",
-                                best.x,
-                                best.y,
-                                index + 1,
-                                hex(opts.colour)
-                            ),
-                            None => format!(
-                                "best ({},{}) - {}/{} samples hold #{}",
-                                best.x,
-                                best.y,
-                                best.count,
-                                scan.table.len(),
-                                hex(opts.colour)
-                            ),
-                        },
+                        Some(best) if opts.slots_only.is_empty() => format!(
+                            "best ({},{}) - {}/{} samples hold #{}",
+                            best.x,
+                            best.y,
+                            best.count,
+                            scan.table.len(),
+                            hex(opts.colour)
+                        ),
+                        Some(best) => format!(
+                            "best ({},{}) - {} #{}",
+                            best.x,
+                            best.y,
+                            cycle::slot_phrase(&opts.slots_only),
+                            hex(opts.colour)
+                        ),
                         None => "no candidate".to_string(),
                     };
                     if scan.armed {
@@ -170,9 +168,10 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
                 } => format!(
                     "{} ({x},{y}) - {} #{}",
                     if clicked { "clicked" } else { "would click" },
-                    match opts.prefer {
-                        Some(index) => format!("slot {} holds", index + 1),
-                        None => format!("{count}/{samples} samples hold"),
+                    if opts.slots_only.is_empty() {
+                        format!("{count}/{samples} samples hold")
+                    } else {
+                        cycle::slot_phrase(&opts.slots_only)
                     },
                     hex(opts.colour)
                 ),

@@ -37,9 +37,10 @@ pub struct Options {
     pub variance: u8,
     /// How many of the five samples must hold the colour.
     pub slots: usize,
-    /// Preferred sample, as an index into the measured table.  When set it
-    /// takes priority over `slots`: only that sample is asked for the colour.
-    pub prefer: Option<usize>,
+    /// Slots that must hold the colour, numbered the way the dye window numbers
+    /// its previews.  When any are chosen they take priority over `slots`: only
+    /// those samples are asked for the colour, and every one must match.
+    pub slots_only: Vec<usize>,
     /// Offsets of the client's Pick Color / Cancel buttons from the palette.
     pub pick_x: i32,
     pub cancel_x: i32,
@@ -67,7 +68,7 @@ impl Default for Options {
             colour: Rgb::black(),
             variance: 0,
             slots: 1,
-            prefer: None,
+            slots_only: Vec::new(),
             pick_x: 147,
             cancel_x: 231,
             button_y: 397,
@@ -522,13 +523,33 @@ fn cancel_roll(
 }
 
 /// The colours to look for, one entry per measured sample, and how many of them
-/// must hold it.  A chosen slot takes priority over the slot count, and is
-/// looked up through the scan's slot map so a partial read cannot shift it.
+/// must hold it.  Chosen slots take priority over the slot count, and are looked
+/// up through the scan's slot map so a partial read cannot shift them.
 fn wanted(opts: &Options, prep: &Prepared) -> (Vec<Option<Rgb>>, usize) {
-    let prefer = opts
-        .prefer
-        .and_then(|slot| prep.slots.iter().position(|mine| *mine == slot));
-    search::plan(prep.table.len(), opts.colour, opts.slots, prefer)
+    let chosen: Vec<usize> = opts
+        .slots_only
+        .iter()
+        .filter_map(|slot| prep.slots.iter().position(|mine| mine == slot))
+        .collect();
+    search::plan(prep.table.len(), opts.colour, opts.slots, &chosen)
+}
+
+/// "1, 3, 5" - the slot numbers a player recognises, from 0-based slots.
+pub fn slot_list(slots: &[usize]) -> String {
+    let mut numbers: Vec<usize> = slots.iter().map(|slot| slot + 1).collect();
+    numbers.sort();
+    numbers.dedup();
+    let parts: Vec<String> = numbers.iter().map(|n| n.to_string()).collect();
+    parts.join(", ")
+}
+
+/// "slot 2 holds" or "slots 1, 3, 5 hold".
+pub fn slot_phrase(slots: &[usize]) -> String {
+    if slots.len() == 1 {
+        format!("slot {} holds", slots[0] + 1)
+    } else {
+        format!("slots {} hold", slot_list(slots))
+    }
 }
 
 /// Run the full cycle until a match is clicked, the colour runs out, or the
@@ -602,20 +623,27 @@ pub fn run(
 
         let (colours, need) = wanted(opts, &prep);
         if let Some(best) = search::search_with(&prep.grid, &prep.table, &colours, opts.variance) {
-            match opts.prefer.filter(|slot| prep.slots.contains(slot)) {
-                Some(slot) => report(&format!(
-                    "  best=({},{}) slot {} holds it",
-                    best.x,
-                    best.y,
-                    slot + 1
-                )),
-                None => report(&format!(
+            let chosen: Vec<usize> = opts
+                .slots_only
+                .iter()
+                .copied()
+                .filter(|slot| prep.slots.contains(slot))
+                .collect();
+            if chosen.is_empty() {
+                report(&format!(
                     "  best=({},{}) {}/{} need={need}",
                     best.x,
                     best.y,
                     best.count,
                     prep.table.len()
-                )),
+                ));
+            } else {
+                report(&format!(
+                    "  best=({},{}) {} it",
+                    best.x,
+                    best.y,
+                    slot_phrase(&chosen)
+                ));
             }
 
             if best.count >= need && prep.table.len() >= MIN_SLOTS {

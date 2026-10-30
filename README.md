@@ -74,7 +74,7 @@ left, the search preview on the right, and a log along the bottom.
 | `Selected colour` / `Save as…` | Named colours, stored in `presets.txt` next to the executable. |
 | `R` `G` `B`, `Hex` | The dye colour. All three stay in sync with the picker. |
 | Colour square + hue strip | Pick the colour visually; the square follows the chosen colour. |
-| `Slot` | Optional. Press 1–5 to require that one sample to hold the colour; press it again to clear. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. Takes priority over `Dye spots`. |
+| `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked (1 3 5) and then all of them must match. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. Takes priority over `Dye spots`. |
 | `Dye spots` | How many of the five samples must hold the colour (1–5). Which sample holds it does not matter. |
 | `Variance ±` | Per-channel tolerance as a number, or drag the slider below it. `0` = exact match. |
 | `Find field` | Locate the palette and report where it is. |
@@ -127,7 +127,7 @@ The legacy GUI (`legacy\c-reference`) has the field table below.
 1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain.
 2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics. The cursor waits below the palette in between, where the client's camera cannot take it.
 3. **Read the sample offsets.** Hovering the grid makes the client draw five markers. Each marker is a **crosshair** (the sample point) joined by a short neck to a **legend box** that shows the colour found there; the box sits 10 px to the right of its crosshair. Measured on every box: `box_fill == gradient[box_centre + (-10, 0)]`, exactly. The samples are then numbered the way the dye window numbers its five previews — 1 under the cursor, 2 and 3 above it, 4 and 5 below — so a chosen slot means the same thing on both sides.
-4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. Picking a slot replaces the count with a single test: only that sample is asked for the colour.
+4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. Picking slots replaces the count with a single test: only the chosen samples are asked for the colour, and all of them must match.
 5. **Act.** Move the cursor to the match and click — or click `Cancel` and start over.
 
 ## Command line
@@ -138,6 +138,7 @@ The Rust build (`target\release\dyetrace.exe`):
 dyetrace --selftest                      :: the twelve behaviour checks -> selftest.txt
 dyetrace --auto --colour 000000 --slots 3 :: run the dye cycle on the live client
 dyetrace --auto --colour 000000 --slot 2  :: same, but require sample 2 to hold it
+dyetrace --auto --colour 000000 --slot 1,3,5 :: require samples 1, 3 and 5
 dyetrace --auto --dry-run                 :: same, but never click the gradient
 dyetrace --probe --out DIR                :: locate the palette, write window/palette BMPs
 dyetrace --replay <clean.bmp> [<hover.bmp>] :: run the pipeline against saved frames

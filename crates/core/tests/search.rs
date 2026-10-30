@@ -50,7 +50,7 @@ fn best_position_wins_on_count() {
 #[test]
 fn a_chosen_slot_overrides_the_slot_count() {
     let want = Rgb::new(1, 2, 3);
-    let (colours, need) = search::plan(5, want, 4, Some(2));
+    let (colours, need) = search::plan(5, want, 4, &[2]);
 
     assert_eq!(need, 1, "one sample is enough when one is chosen");
     assert_eq!(colours.len(), 5);
@@ -59,9 +59,22 @@ fn a_chosen_slot_overrides_the_slot_count() {
 }
 
 #[test]
+fn several_chosen_slots_must_all_hold_the_colour() {
+    let want = Rgb::new(1, 2, 3);
+    let (colours, need) = search::plan(5, want, 4, &[0, 2, 4]);
+
+    assert_eq!(need, 3);
+    assert_eq!(colours[0], Some(want));
+    assert_eq!(colours[2], Some(want));
+    assert_eq!(colours[4], Some(want));
+    assert_eq!(colours[1], None);
+    assert_eq!(colours[3], None);
+}
+
+#[test]
 fn without_a_choice_the_count_decides() {
     let want = Rgb::new(1, 2, 3);
-    let (colours, need) = search::plan(5, want, 3, None);
+    let (colours, need) = search::plan(5, want, 3, &[]);
 
     assert_eq!(need, 3);
     assert!(colours.iter().all(|c| *c == Some(want)));
@@ -69,7 +82,7 @@ fn without_a_choice_the_count_decides() {
 
 #[test]
 fn a_slot_the_table_does_not_have_falls_back_to_the_count() {
-    let (colours, need) = search::plan(4, Rgb::new(1, 2, 3), 2, Some(4));
+    let (colours, need) = search::plan(4, Rgb::new(1, 2, 3), 2, &[4]);
 
     assert_eq!(need, 2);
     assert_eq!(colours.len(), 4);
@@ -77,7 +90,17 @@ fn a_slot_the_table_does_not_have_falls_back_to_the_count() {
 }
 
 #[test]
+fn only_the_reachable_chosen_slots_are_asked_for() {
+    let want = Rgb::new(1, 2, 3);
+    let (colours, need) = search::plan(3, want, 5, &[1, 4]);
+
+    assert_eq!(need, 1);
+    assert_eq!(colours[1], Some(want));
+    assert_eq!(colours.iter().filter(|c| c.is_some()).count(), 1);
+}
+
+#[test]
 fn the_requirement_cannot_exceed_the_table() {
-    let (_, need) = search::plan(3, Rgb::black(), 5, None);
+    let (_, need) = search::plan(3, Rgb::black(), 5, &[]);
     assert_eq!(need, 3);
 }

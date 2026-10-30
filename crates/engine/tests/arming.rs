@@ -221,8 +221,51 @@ fn an_idle_window_is_armed_with_one_pick_color_press() {
 }
 
 #[test]
-fn an_armed_window_is_used_without_pressing_anything() {
+fn every_chosen_slot_must_hold_the_colour() {
     let client = Client::new(true);
+    // The stand-in's gradient is (3x, 3y, 0x80), so this colour exists at one
+    // position only: (27, 27).
+    let colour = Rgb::new(0x51, 0x51, 0x80);
+
+    let one = cycle::scan_once(
+        &client,
+        &client,
+        &client,
+        &Options {
+            colour,
+            slots_only: vec![0],
+            ..Options::default()
+        },
+    )
+    .expect("scan");
+    assert_eq!(
+        one.best.map(|best| (best.x, best.y)),
+        Some((27, 27)),
+        "slot 1 is the pointer's own sample"
+    );
+
+    // Add slot 2, which samples 47 px up and left: no position holds the colour
+    // in both samples, so nothing can satisfy the pair.
+    let two = cycle::scan_once(
+        &client,
+        &client,
+        &client,
+        &Options {
+            colour,
+            slots_only: vec![0, 1],
+            ..Options::default()
+        },
+    )
+    .expect("scan");
+    assert!(
+        two.best.map(|best| best.count).unwrap_or(0) < 2,
+        "both slots cannot hold it, got {:?}",
+        two.best
+    );
+}
+
+#[test]
+fn an_armed_window_is_used_without_pressing_anything() {    let client = Client::new(true);
 
     let scan = cycle::scan_once(&client, &client, &client, &Options::default())
         .expect("a live legend needs no arming");
