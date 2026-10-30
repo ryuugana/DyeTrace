@@ -1,0 +1,869 @@
+//! The window: controls on the left, colour picker and match preview on the
+//! right.
+
+use crate::config::Config;
+use crate::hotkey::{self, StopKey};
+use crate::hsv;
+use crate::picker::{self, PickerTextures};
+use crate::presets::Presets;
+use crate::preview::Preview;
+use crate::worker::{self, Job, Msg, Worker};
+
+use dyetrace_core::image::{Image, Rgb};
+use dyetrace_core::search;
+use dyetrace_engine::cycle::{Options, Scan};
+
+use eframe::egui::{self, Color32, RichText, Sense, Stroke, TextureHandle, Vec2};
+
+/// What a scan measured on one roll of the palette.
+struct Offsets {
+    pointer: (i32, i32),
+    table: Vec<(i32, i32)>,
+    slots: Vec<usize>,
+    boxes: Vec<(i32, i32)>,
+    best: Option<search::Match>,
+}
+
+/// A fingerprint of a palette, for the texture cache.
+fn signature_key(signature: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in signature {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
+}
+
+/// A group's background: one step up from the window, with a hairline border, so
+/// the parts of the form read as groups rather than one long list.
+const CARD_FILL: Color32 = Color32::from_gray(27);
+const CARD_EDGE: Color32 = Color32::from_gray(48);
+/// How far a card's contents sit inside its edge.
+const CARD_MARGIN: i8 = 10;
+/// The colour square, and the gap it leaves before the column beside it.
+const PICKER_SIDE: f32 = 124.0;
+const COLUMN_GAP: f32 = 12.0;
+/// The air between one card and the next.
+const CARD_GAP: f32 = 8.0;
+/// The line a card's heading takes, so a box can be measured around it.
+const HEADING_ROOM: f32 = 26.0;
+/// The height of the button row, of the box around it, and the gap the buttons
+/// keep between each other.
+const BUTTON_ROW: f32 = 28.0;
+const BUTTON_GAP: f32 = 10.0;
+const BUTTONS_HEIGHT: f32 = BUTTON_ROW + 2.0 * 9.0 + 2.0;
+
+/// Run `add` inside a card, and hand back whatever it returned.
+///
+/// Every card is as wide as the column it sits in, whatever is inside it, so the
+/// stack reads as one block with even edges.
+fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    card_frame(ui, add).inner
+}
+
+/// The same, keeping the frame's response so a caller can use the rectangle it
+/// came out at.
+fn card_frame<R>(
+    ui: &mut egui::Ui,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    egui::Frame::new()
+        .fill(CARD_FILL)
+        .stroke(Stroke::new(1.0_f32, CARD_EDGE))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(CARD_MARGIN, 9))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            // The stack outside the cards has no spacing of its own, so the gaps
+            // between cards are the gaps that are asked for; rows inside a card
+            // get it back.
+            ui.spacing_mut().item_spacing.y = 6.0;
+            add(ui)
+        })
+}
+
+/// A group's name: small, quiet and in capitals, so the eye lands on the values
+/// underneath instead of reading every label at the same weight.
+fn heading(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .size(10.5)
+            .strong()
+            .color(Color32::from_gray(152)),
+    );
+    ui.add_space(3.0);
+}
+
+/// The spacing, rounding and colours the whole window is drawn with.
+fn apply_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(10.0, 4.0);
+    style.spacing.interact_size.y = 22.0;
+    style.spacing.slider_width = 120.0;
+
+    style.visuals.panel_fill = Color32::from_gray(18);
+    style.visuals.window_fill = Color32::from_gray(20);
+    style.visuals.extreme_bg_color = Color32::from_gray(14);
+    style.visuals.faint_bg_color = Color32::from_gray(24);
+
+    for widget in [
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::same(5);
+    }
+    style.visuals.widgets.inactive.bg_fill = Color32::from_gray(38);
+    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_gray(38);
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_gray(64));
+    style.visuals.widgets.hovered.bg_fill = Color32::from_gray(52);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_gray(52);
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_gray(92));
+    style.visuals.widgets.active.bg_fill = Color32::from_gray(60);
+    style.visuals.widgets.active.weak_bg_fill = Color32::from_gray(60);
+    style.visuals.selection.bg_fill = Color32::from_rgb(46, 104, 196);
+    style.visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_gray(230));
+
+    ctx.set_style(style);
+}
+
+pub struct DyeTraceApp {
+    colour: Rgb,
+    hex_text: String,
+    hue: f32,
+    saturation: f32,
+    value: f32,
+
+    slots: usize,
+    variance: u8,
+    /// Rolls Auto may try after the first before giving up.
+    retries: usize,
+    /// Slots that must hold the colour, numbered as the dye window does.  Empty
+    /// falls back to `slots`.
+    slots_only: Vec<usize>,
+
+    presets: Presets,
+    save_name: String,
+
+    textures: PickerTextures,
+    hit_texture: Option<TextureHandle>,
+    hit_key: (u32, u8, u64),
+
+    preview: Preview,
+    worker: Worker,
+    stop_key: StopKey,
+    /// The key the player picked to stop a cycle.
+    stop_on: egui::Key,
+    /// Waiting for the player to press the key they want.
+    recording: bool,
+    /// Is the About window open?
+    about: bool,
+    /// The settings as they were last written out.
+    saved: Config,
+
+    scan: Option<Scan>,
+    status: String,
+    /// Where the left column of cards ends, in screen coordinates.  The buttons
+    /// beside the preview are placed to finish on that same line.
+    left_bottom: f32,
+}
+
+impl DyeTraceApp {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // The preview is a dark backdrop with white/red hits, so the window is
+        // dark whatever the desktop theme is doing.
+        cc.egui_ctx
+            .options_mut(|options| options.theme_preference = egui::ThemePreference::Dark);
+        apply_style(&cc.egui_ctx);
+
+        let saved = Config::load();
+        let preview = Preview::spawn();
+        let worker = Worker::spawn(&preview);
+        let stop_key = StopKey::watch(worker.stop_flag().expect("worker stop flag"));
+        stop_key.set(saved.stop_key);
+
+        let mut app = Self {
+            colour: saved.colour,
+            hex_text: String::new(),
+            hue: 0.0,
+            saturation: 0.0,
+            value: 0.0,
+            slots: saved.spots,
+            variance: saved.variance,
+            retries: saved.retries,
+            slots_only: saved.slots.clone(),
+            presets: Presets::load(),
+            save_name: String::new(),
+            textures: PickerTextures::default(),
+            hit_texture: None,
+            hit_key: (u32::MAX, 0, 0),
+            preview,
+            worker,
+            stop_key,
+            stop_on: hotkey::key_for(saved.stop_key).unwrap_or_else(hotkey::default_key),
+            recording: false,
+            about: false,
+            saved,
+            scan: None,
+            status: "Watching for the dye window".to_string(),
+            left_bottom: 0.0,
+        };
+
+        app.set_colour(app.colour);
+        app
+    }
+
+    fn set_colour(&mut self, colour: Rgb) {
+        self.colour = colour;
+        self.hex_text = worker::hex(colour);
+        let (h, s, v) = hsv::rgb_to_hsv(colour.r, colour.g, colour.b);
+        // Keep the hue when the colour is grey, otherwise the picker jumps.
+        if s > 0.001 && v > 0.001 {
+            self.hue = h;
+        }
+        self.saturation = s;
+        self.value = v;
+    }
+
+    /// The name of the current colour: a saved one if it matches, otherwise
+    /// "Custom".  The latest match wins, so a colour saved under a new name is
+    /// shown under that name.
+    fn colour_name(&self) -> String {
+        self.presets.name_of(self.colour).unwrap_or("Custom").to_string()
+    }
+
+    /// Take the next key the player presses as the stop key.
+    fn capture_stop_key(&mut self, ctx: &egui::Context) {
+        let pressed = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    ..
+                } => Some(*key),
+                _ => None,
+            })
+        });
+
+        let Some(key) = pressed else { return };
+        if let Some(code) = hotkey::virtual_key(key) {
+            self.stop_on = key;
+            self.stop_key.set(code);
+            self.recording = false;
+        }
+    }
+
+    /// Write the settings out when any of them changed.
+    fn remember(&mut self) {
+        let current = Config {
+            colour: self.colour,
+            spots: self.slots,
+            retries: self.retries,
+            variance: self.variance,
+            slots: self.slots_only.clone(),
+            stop_key: hotkey::virtual_key(self.stop_on).unwrap_or(self.saved.stop_key),
+        };
+
+        if current != self.saved {
+            current.save();
+            self.saved = current;
+        }
+    }
+
+    fn colour_from_picker(&mut self) {
+        let (r, g, b) = hsv::hsv_to_rgb(self.hue, self.saturation, self.value);
+        self.colour = Rgb::new(r, g, b);
+        self.hex_text = worker::hex(self.colour);
+    }
+
+    fn options(&self, dry_run: bool) -> Options {
+        Options {
+            colour: self.colour,
+            variance: self.variance,
+            slots: self.slots,
+            slots_only: self.slots_only.clone(),
+            // One roll is the attempt, the rest are retries; 0 keeps going.
+            max_cycles: match self.retries {
+                0 => usize::MAX,
+                retries => retries.saturating_add(1),
+            },
+            dry_run,
+            stop: self.worker.stop_flag(),
+            ..Options::default()
+        }
+    }
+
+    fn drain_worker(&mut self, ctx: &egui::Context) {
+        for message in self.worker.poll() {
+            match message {
+                Msg::Status(text) => self.status = text,
+                Msg::Scanned(scan) => {
+                    self.hit_key = (u32::MAX, 0, 0);
+                    self.scan = Some(*scan);
+                }
+                Msg::Finished => {
+                    // the job may have clicked inside the client, which gives it
+                    // focus; come back to the front when it is done
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+            }
+        }
+        if self.worker.busy {
+            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        }
+    }
+
+    fn ensure_hit_texture(&mut self, ctx: &egui::Context, grid: &Image, signature: &[u8]) {
+        let key = (self.colour.to_u32(), self.variance, signature_key(signature));
+        if self.hit_texture.is_some() && key == self.hit_key {
+            return;
+        }
+
+        let map = search::hit_map(grid, self.colour, self.variance);
+        let mut pixels = Vec::with_capacity(map.len());
+        for value in map {
+            let (r, g, b) = (
+                ((value >> 16) & 0xFF) as u8,
+                ((value >> 8) & 0xFF) as u8,
+                (value & 0xFF) as u8,
+            );
+            pixels.push(Color32::from_rgb(r, g, b));
+        }
+        let image = egui::ColorImage {
+            size: [dyetrace_core::SCAN_W, dyetrace_core::SCAN_H],
+            pixels,
+        };
+        self.hit_texture = Some(ctx.load_texture("hit-map", image, Default::default()));
+        self.hit_key = key;
+    }
+
+    /// Colour selection, the RGB and hex boxes, and the picker with the match
+    /// settings beside it - each group in its own card.
+    fn controls(&mut self, ui: &mut egui::Ui) {
+        // The stack has no spacing of its own, so the gaps between cards are
+        // exactly the gaps asked for - equal, whatever the cards contain.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.add_space(CARD_GAP);
+
+        card(ui, |ui| {
+            heading(ui, "Colour selection");
+            let mut picked: Option<usize> = None;
+            ui.horizontal(|ui| {
+                picker::swatch(ui, Vec2::new(22.0, 22.0), self.colour);
+                let width = ui.available_width() - 92.0;
+                egui::ComboBox::from_id_salt("presets")
+                    .width(width.max(110.0))
+                    .selected_text(self.colour_name())
+                    .show_ui(ui, |ui| {
+                        for (index, preset) in self.presets.items.iter().enumerate() {
+                            if ui
+                                .selectable_label(
+                                    preset.colour == self.colour,
+                                    format!("{:<12} #{}", preset.name, worker::hex(preset.colour)),
+                                )
+                                .clicked()
+                            {
+                                picked = Some(index);
+                            }
+                        }
+                    });
+                if ui
+                    .add_sized([76.0, 22.0], egui::Button::new("Save as..."))
+                    .clicked()
+                {
+                    let name = self.save_name.clone();
+                    let colour = self.colour;
+                    self.presets.save(&name, colour);
+                    self.save_name.clear();
+                }
+            });
+            if let Some(index) = picked {
+                let colour = self.presets.items[index].colour;
+                self.set_colour(colour);
+            }
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [64.0, 20.0],
+                    egui::TextEdit::singleline(&mut self.save_name).hint_text("name"),
+                );
+                ui.label(RichText::new("saved into presets.txt").weak().small());
+            });
+        });
+
+        ui.add_space(CARD_GAP);
+
+        card(ui, |ui| {
+            heading(ui, "RGB / hex values");
+            ui.horizontal(|ui| {
+                let mut changed = false;
+                for (label, channel) in [
+                    ("R", &mut self.colour.r),
+                    ("G", &mut self.colour.g),
+                    ("B", &mut self.colour.b),
+                ] {
+                    ui.label(RichText::new(label).color(Color32::from_gray(170)));
+                    if ui
+                        .add_sized(
+                            [56.0, 22.0],
+                            egui::DragValue::new(channel).range(0..=255).speed(1.0),
+                        )
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let colour = self.colour;
+                    self.set_colour(colour);
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Hex").color(Color32::from_gray(170)));
+                let response = ui.add_sized(
+                    [96.0, 22.0],
+                    egui::TextEdit::singleline(&mut self.hex_text).char_limit(6),
+                );
+                if response.changed() {
+                    let text = self.hex_text.trim().trim_start_matches('#').to_string();
+                    if text.len() == 6 {
+                        if let Ok(value) = u32::from_str_radix(&text, 16) {
+                            self.set_colour(Rgb::from_u32(value));
+                            self.hex_text = text.to_uppercase();
+                        }
+                    }
+                }
+                ui.label(RichText::new("(web)").weak());
+            });
+        });
+
+        ui.add_space(CARD_GAP);
+
+        let drawn = card_frame(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    let mut changed = picker::saturation_value_square(
+                        ui,
+                        &mut self.textures,
+                        Vec2::splat(PICKER_SIDE),
+                        &mut self.hue,
+                        &mut self.saturation,
+                        &mut self.value,
+                    );
+                    ui.add_space(4.0);
+                    changed |= picker::hue_strip(
+                        ui,
+                        &mut self.textures,
+                        Vec2::new(PICKER_SIDE, 14.0),
+                        &mut self.hue,
+                    );
+                    if changed {
+                        self.colour_from_picker();
+                    }
+                });
+
+                ui.add_space(COLUMN_GAP);
+                ui.vertical(|ui| self.match_controls(ui));
+            });
+        });
+        // Where the column ends: the buttons on the right finish level with it.
+        self.left_bottom = drawn.response.rect.max.y;
+
+    }
+
+    /// Start, About and the stop key: one size, one distance apart, with the key
+    /// that is set shown beside them.
+    fn buttons(&mut self, ui: &mut egui::Ui) {
+        let busy = self.worker.busy;
+        let mut start = false;
+        let mut about = false;
+
+        let key = if self.recording {
+            "press a key".to_string()
+        } else {
+            self.stop_on.name().to_string()
+        };
+        let key_width = ui.fonts(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    key.clone(),
+                    egui::FontId::proportional(15.0),
+                    Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+        });
+
+        // The buttons take what the key name leaves, so a long one such as
+        // Backspace shortens them instead of pushing the row out of the box.
+        let room = ui.available_width().max(200.0);
+        let width = ((room - 3.0 * BUTTON_GAP - key_width) / 3.0).clamp(56.0, 96.0);
+        let total = 3.0 * width + 3.0 * BUTTON_GAP + key_width;
+        let pad = ((room - total) * 0.5).max(0.0);
+
+        let size = egui::vec2(ui.available_width(), BUTTON_ROW);
+        ui.allocate_ui(size, |ui| {
+            // The gaps are the ones added below, not egui's own as well.
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.horizontal(|ui| {
+                ui.add_space(pad);
+
+                let button = |label: RichText| {
+                    egui::Button::new(label).min_size(egui::vec2(width, BUTTON_ROW))
+                };
+
+                start = ui
+                    .add_enabled(
+                        !busy,
+                        button(RichText::new("Start").strong()),
+                    )
+                    .clicked();
+                ui.add_space(BUTTON_GAP);
+
+                about = ui.add_enabled(!busy, button(RichText::new("About"))).clicked();
+                ui.add_space(BUTTON_GAP);
+
+                if ui.add(button(RichText::new("Stop Key"))).clicked() {
+                    self.recording = true;
+                }
+                ui.add_space(BUTTON_GAP);
+
+                ui.label(RichText::new(key).strong().size(15.0));
+            });
+        });
+
+        if start {
+            self.worker.submit(Job::Auto(self.options(false)));
+        }
+        if about {
+            self.about = true;
+        }
+    }
+
+    /// Slot selection, dye spots, retries and variance, in the column beside the
+    /// colour square.
+    fn match_controls(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "Presets");
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let mut chosen = self.slots_only.clone();
+            for n in 1..=5usize {
+                let slot = n - 1;
+                let selected = chosen.contains(&slot);
+                let button = egui::Button::new(format!("{n}")).selected(selected);
+                if ui.add_sized([26.0, 22.0], button).clicked() {
+                    if selected {
+                        chosen.retain(|picked| *picked != slot);
+                    } else {
+                        chosen.push(slot);
+                        chosen.sort();
+                    }
+                }
+            }
+            self.slots_only = chosen;
+        });
+
+        ui.add_space(8.0);
+        egui::Grid::new("match-controls")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Dye spots");
+                ui.add_sized(
+                    [46.0, 22.0],
+                    egui::DragValue::new(&mut self.slots).range(1..=5).speed(0.1),
+                );
+                ui.end_row();
+
+                ui.label("Retries");
+                ui.add_sized(
+                    [46.0, 22.0],
+                    egui::DragValue::new(&mut self.retries).range(0..=99).speed(0.1),
+                );
+                ui.end_row();
+
+                ui.label("Variance ±");
+                ui.add_sized(
+                    [46.0, 22.0],
+                    egui::DragValue::new(&mut self.variance).range(0..=255).speed(1.0),
+                );
+                ui.end_row();
+            });
+
+        ui.add_space(2.0);
+        ui.spacing_mut().slider_width = (ui.available_width() - 4.0).max(60.0);
+        ui.add(egui::Slider::new(&mut self.variance, 0..=255).show_value(false));
+    }
+
+    fn preview_panel(&mut self, ui: &mut egui::Ui, side: f32) {
+        heading(ui, "Canvas preview");
+        let snapshot = self.preview.latest();
+        if let Some(snapshot) = &snapshot {
+            self.ensure_hit_texture(ui.ctx(), &snapshot.grid, &snapshot.signature);
+        }
+
+        // The offsets belong to the roll they were measured on: once the palette
+        // is rolled again they mean nothing and are not drawn.
+        let offsets = match (&snapshot, &self.scan) {
+            (Some(snapshot), Some(scan)) if snapshot.shows(&scan.signature) => Some(Offsets {
+                pointer: scan.pointer,
+                table: scan.table.clone(),
+                slots: scan.slots.clone(),
+                boxes: scan.boxes.clone(),
+                best: scan.best,
+            }),
+            _ => None,
+        };
+
+        // The square sits in the middle of the box, however much wider the box is
+        // than the picture the left column left room for.
+        let width = ui.available_width();
+        let side = side.min(width);
+        let (outer, _) = ui.allocate_exact_size(Vec2::new(width, side), Sense::hover());
+        let rect = egui::Rect::from_center_size(outer.center(), Vec2::splat(side));
+
+        if snapshot.is_none() {
+            ui.painter().rect_filled(rect, 4.0, Color32::from_gray(24));
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                Stroke::new(1.0_f32, Color32::from_gray(60)),
+                egui::StrokeKind::Inside,
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Waiting for the dye window",
+                egui::FontId::proportional(12.0),
+                Color32::from_gray(130),
+            );
+            return;
+        }
+
+        if let Some(texture) = &self.hit_texture {
+            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            ui.painter()
+                .image(texture.id(), rect, uv, Color32::WHITE);
+        }
+
+        let Some(offsets) = offsets else {
+            return;
+        };
+
+        let scale = rect.width() / dyetrace_core::SCAN_W as f32;
+        let to_screen = |x: i32, y: i32| {
+            egui::pos2(
+                rect.left() + x as f32 * scale,
+                rect.top() + y as f32 * scale,
+            )
+        };
+
+        // legend boxes the client drew
+        for (bx, by) in &offsets.boxes {
+            let centre = to_screen(*bx, *by);
+            ui.painter().rect_stroke(
+                egui::Rect::from_center_size(centre, Vec2::splat(5.0)),
+                0.0,
+                Stroke::new(1.0_f32, Color32::from_rgb(0, 200, 255)),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        // sample offsets around the pointer, numbered to match the slot picker
+        for (index, (dx, dy)) in offsets.table.iter().enumerate() {
+            let slot = offsets.slots.get(index).copied().unwrap_or(index);
+            let point = to_screen(offsets.pointer.0 + dx, offsets.pointer.1 + dy);
+            if !rect.contains(point) {
+                continue;
+            }
+            let chosen = self.slots_only.contains(&slot);
+            let colour = if chosen {
+                Color32::from_rgb(20, 90, 220)
+            } else {
+                Color32::from_gray(120)
+            };
+            let width = if chosen { 2.0_f32 } else { 1.0_f32 };
+            ui.painter().circle_stroke(
+                point,
+                if chosen { 5.0 } else { 2.5 },
+                Stroke::new(width, colour),
+            );
+            ui.painter().text(
+                point + Vec2::new(5.0, -5.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("{}", slot + 1),
+                egui::FontId::proportional(10.0),
+                colour,
+            );
+        }
+
+        // the best position
+        if let Some(best) = offsets.best {
+            let centre = to_screen(best.x, best.y);
+            ui.painter().circle_stroke(
+                centre,
+                7.0,
+                Stroke::new(2.0_f32, Color32::from_rgb(0, 255, 140)),
+            );
+            ui.painter().line_segment(
+                [
+                    centre + Vec2::new(-11.0, 0.0),
+                    centre + Vec2::new(11.0, 0.0),
+                ],
+                Stroke::new(1.0_f32, Color32::from_rgb(0, 255, 140)),
+            );
+            ui.painter().line_segment(
+                [
+                    centre + Vec2::new(0.0, -11.0),
+                    centre + Vec2::new(0.0, 11.0),
+                ],
+                Stroke::new(1.0_f32, Color32::from_rgb(0, 255, 140)),
+            );
+        }
+    }
+
+    /// What the tool is, and how to use it.
+    fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.about {
+            return;
+        }
+
+        let mut open = true;
+        egui::Window::new("About DyeTrace")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(340.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new("An open-source dye palette finder for Mabinogi").strong(),
+                );
+                ui.add_space(6.0);
+                ui.label("Open the Dye window in game and leave it visible.");
+                ui.label(
+                    "The picture on the right is the palette: white where the colour is not, red where it is.",
+                );
+                ui.add_space(8.0);
+                ui.label("1. Pick the colour: RGB, hex, or the square.");
+                ui.label("2. Dye spots is how many of the five samples must hold it;");
+                ui.label("   Slot pins particular samples the dye window numbers 1 to 5.");
+                ui.label("3. Start rolls the dye until it finds a place and clicks it.");
+                ui.label("4. The stop key ends a run; Set records a different one.");
+                ui.add_space(8.0);
+                ui.hyperlink_to(
+                    "github.com/ryuugana/DyeTrace",
+                    "https://github.com/ryuugana/DyeTrace",
+                );
+            });
+
+        self.about = open;
+    }
+
+    /// The one line of feedback, along the bottom edge of the window.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let busy = self.worker.busy;
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+            let colour = if busy {
+                Color32::from_rgb(224, 176, 66)
+            } else {
+                Color32::from_rgb(104, 178, 118)
+            };
+            ui.painter().circle_filled(rect.center(), 4.0, colour);
+            if busy {
+                ui.spinner();
+            }
+            ui.label(RichText::new("Status:").color(Color32::from_gray(140)));
+            ui.label(RichText::new(&self.status).strong());
+        });
+    }
+}
+
+impl eframe::App for DyeTraceApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.drain_worker(ctx);
+
+        if self.recording {
+            self.capture_stop_key(ctx);
+        }
+
+        // The palette is watched on its own thread; wake up often enough to show
+        // what it found.
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+
+        egui::TopBottomPanel::bottom("status")
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(14))
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(ctx, |ui| {
+                self.status_bar(ui);
+            });
+
+        egui::SidePanel::left("controls")
+            .resizable(false)
+            .exact_width(340.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(18))
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(ctx, |ui| {
+                self.controls(ui);
+            });
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(18))
+                    .inner_margin(egui::Margin::symmetric(8, 6)),
+            )
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let space = ui.available_size();
+                let page_top = ui.cursor().min.y;
+                ui.add_space(CARD_GAP);
+
+                // The two columns start and finish on the same lines: the preview
+                // box begins where the first card on the left begins, and the
+                // buttons box ends where the last card on the left ends.
+                let bottom = if self.left_bottom > 0.0 {
+                    self.left_bottom
+                } else {
+                    page_top + space.y
+                };
+
+                // The canvas is square, so its box is only as tall as the picture
+                // and its heading - and it has to leave the buttons their line.
+                let room_for_picture = bottom
+                    - BUTTONS_HEIGHT
+                    - CARD_GAP
+                    - page_top
+                    - CARD_GAP
+                    - HEADING_ROOM
+                    - 2.0 * 9.0
+                    - 2.0;
+                let width_limit = space.x - 2.0 * CARD_MARGIN as f32 - 2.0;
+                let side = room_for_picture.min(width_limit).clamp(160.0, 640.0);
+                card(ui, |ui| self.preview_panel(ui, side));
+
+                // The buttons sit at the foot of the column, level with the
+                // bottom of the picker card across from them.
+                let target = bottom - BUTTONS_HEIGHT;
+                let here = ui.cursor().min.y;
+                if target > here {
+                    ui.add_space(target - here);
+                }
+                card(ui, |ui| self.buttons(ui));
+            });
+
+        self.about_window(ctx);
+        self.remember();
+    }
+}

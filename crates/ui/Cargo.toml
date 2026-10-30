@@ -1,0 +1,19 @@
+[package]
+name = "dyetrace-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "DyeTrace windowed interface"
+
+[[bin]]
+name = "dyetrace-ui"
+path = "src/main.rs"
+
+[dependencies]
+dyetrace-core = { path = "../core" }
+dyetrace-platform = { path = "../platform" }
+dyetrace-engine = { path = "../engine" }
+eframe = "0.31"
+
+[target.'cfg(windows)'.dependencies]
+dyetrace-platform-win = { path = "../platform-win" }

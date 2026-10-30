@@ -1,0 +1,18 @@
+[package]
+name = "dyetrace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Open-source dye palette finder for Mabinogi"
+
+[[bin]]
+name = "dyetrace"
+path = "src/main.rs"
+
+[dependencies]
+dyetrace-core = { path = "../core" }
+dyetrace-engine = { path = "../engine" }
+dyetrace-platform = { path = "../platform" }
+
+[target.'cfg(windows)'.dependencies]
+dyetrace-platform-win = { path = "../platform-win" }

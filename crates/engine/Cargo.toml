@@ -1,0 +1,10 @@
+[package]
+name = "dyetrace-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dye cycle built on the DyeTrace core and platform traits"
+
+[dependencies]
+dyetrace-core = { path = "../core" }
+dyetrace-platform = { path = "../platform" }

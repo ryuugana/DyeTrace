@@ -1,0 +1,9 @@
+[package]
+name = "dyetrace-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform trait definitions and replay harness for DyeTrace"
+
+[dependencies]
+dyetrace-core = { path = "../core" }
