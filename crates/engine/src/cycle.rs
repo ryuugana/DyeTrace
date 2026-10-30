@@ -287,19 +287,29 @@ static LAST_ORIGIN: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 /// gradient, otherwise a search of the whole frame.
 fn origin_in(frame: &Image, hint: Option<(i32, i32)>) -> Option<(i32, i32)> {
     if let Some(origin) = hint {
-        if let Some(image) = palette_grab(frame, origin) {
-            if palette::gradient_percent(&image) >= MIN_GRADIENT {
-                return Some(origin);
-            }
+        if holds_palette(frame, origin) {
+            return Some(origin);
         }
     }
 
     let origin = palette::find_square_field(frame).or_else(|| palette::find_field(frame))?;
-    let image = palette_grab(frame, origin)?;
-    if palette::gradient_percent(&image) >= MIN_GRADIENT {
+    if holds_palette(frame, origin) {
         Some(origin)
     } else {
         None
+    }
+}
+
+/// Is the palette at this corner?  The gradient has to fill the square and the
+/// dye form's black line has to be around it, so a remembered corner that has
+/// become an inventory window is not mistaken for the palette.
+fn holds_palette(frame: &Image, origin: (i32, i32)) -> bool {
+    if !palette::has_frame(frame, origin) {
+        return false;
+    }
+    match palette_grab(frame, origin) {
+        Some(image) => palette::gradient_percent(&image) >= MIN_GRADIENT,
+        None => false,
     }
 }
 

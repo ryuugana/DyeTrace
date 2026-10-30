@@ -43,11 +43,25 @@ fn near(pos: (i32, i32), button: (i32, i32)) -> bool {
 /// and hovering the grid - the client's legend.
 fn draw(armed: bool, pointer: (i32, i32), _roll: u8) -> Image {
     let mut img = Image::filled(FRAME_W, FRAME_H, Rgb::new(0x60, 0x60, 0x60));
-    for y in 0..CAP_H as i32 {
-        for x in 0..CAP_W as i32 {
+    for y in 0..CAP_H as i32 - 2 {
+        for x in 0..CAP_W as i32 - 2 {
             let r = (x as u8).wrapping_mul(3);
             let g = (y as u8).wrapping_mul(3);
             img.put_i(PAL.0 + x, PAL.1 + y, Rgb::new(r, g, 0x80));
+        }
+    }
+
+    // The dye form draws a one-pixel black line around the gradient; that line
+    // is how the palette is told apart from the client's own panels.  The
+    // gradient is 254 px of colour inside a 256 px line.
+    for i in -1..CAP_W as i32 - 1 {
+        for (x, y) in [
+            (PAL.0 + i, PAL.1 - 1),
+            (PAL.0 + i, PAL.1 + CAP_H as i32 - 2),
+            (PAL.0 - 1, PAL.1 + i),
+            (PAL.0 + CAP_W as i32 - 2, PAL.1 + i),
+        ] {
+            img.put_i(x, y, Rgb::black());
         }
     }
 
@@ -371,13 +385,23 @@ impl Screen for DimLabel {
 
     fn capture(&self, x: i32, y: i32, w: u32, h: u32) -> Option<Image> {
         let mut img = Image::filled(FRAME_W, FRAME_H, Rgb::new(0x60, 0x60, 0x60));
-        for y in 0..CAP_H as i32 {
-            for x in 0..CAP_W as i32 {
+        for y in 0..CAP_H as i32 - 2 {
+            for x in 0..CAP_W as i32 - 2 {
                 img.put_i(
                     PAL.0 + x,
                     PAL.1 + y,
                     Rgb::new((x * 3) as u8, (y * 3) as u8, 0x80),
                 );
+            }
+        }
+        for i in -1..CAP_W as i32 - 1 {
+            for (px, py) in [
+                (PAL.0 + i, PAL.1 - 1),
+                (PAL.0 + i, PAL.1 + CAP_H as i32 - 2),
+                (PAL.0 - 1, PAL.1 + i),
+                (PAL.0 + CAP_W as i32 - 2, PAL.1 + i),
+            ] {
+                img.put_i(px, py, Rgb::black());
             }
         }
         let lx = PAL.0 + label::LABEL_X;

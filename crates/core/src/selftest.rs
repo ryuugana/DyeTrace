@@ -33,12 +33,23 @@ fn colourful_grab() -> Image {
     img
 }
 
-/// A 400x400 grab with a 256x256 gradient square on a flat background.
+/// A 400x400 grab with a 254 px gradient on a flat background, inside the
+/// 256 px black line the dye form draws around it.
 fn square_on_background() -> Image {
     let mut img = Image::filled(400, 400, Rgb::new(0x30, 0x30, 0x30));
-    for y in 40..40 + CAP_H {
-        for x in 30..30 + CAP_W {
-            img.put(x, y, Rgb::new((x * 3) as u8, (y * 3) as u8, 0x80));
+    for y in 40..40 + CAP_H as i32 - 2 {
+        for x in 30..30 + CAP_W as i32 - 2 {
+            img.put_i(x, y, Rgb::new((x * 3) as u8, (y * 3) as u8, 0x80));
+        }
+    }
+    for i in -1..CAP_W as i32 - 1 {
+        for (x, y) in [
+            (30 + i, 39),
+            (30 + i, 40 + CAP_H as i32 - 2),
+            (29, 40 + i),
+            (30 + CAP_W as i32 - 2, 40 + i),
+        ] {
+            img.put_i(x, y, Rgb::black());
         }
     }
     img

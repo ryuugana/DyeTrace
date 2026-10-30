@@ -173,7 +173,10 @@ fn run_replay(args: &[String]) -> i32 {
     };
 
     let origin = palette::find_square_field(clean.frame())
-        .or_else(|| palette::find_field(clean.frame()));
+        .or_else(|| palette::find_field(clean.frame()))
+        // The ring is the test: without it this is some panel of the interface,
+        // not the dye gradient.
+        .filter(|origin| palette::has_frame(clean.frame(), *origin));
 
     let (ox, oy) = match origin {
         Some(o) => o,

@@ -144,13 +144,29 @@ fn publish(shared: &Shared, snapshot: Snapshot) {
 /// otherwise a fresh search of the frame.
 fn origin_for(frame: &Image, cached: Option<(i32, i32)>) -> Option<(i32, i32)> {
     if let Some(origin) = cached {
-        if let Some(grid) = frame.sub_image(origin.0, origin.1, CAP_W, CAP_H) {
-            if palette::gradient_percent(&grid) >= MIN_GRADIENT {
-                return Some(origin);
-            }
+        if is_palette(frame, origin) {
+            return Some(origin);
         }
     }
-    palette::find_square_field(frame).or_else(|| palette::find_field(frame))
+    let origin = palette::find_square_field(frame).or_else(|| palette::find_field(frame))?;
+    if is_palette(frame, origin) {
+        Some(origin)
+    } else {
+        None
+    }
+}
+
+/// Is the palette at this corner?  The search insists on the black line around
+/// the gradient, and so does this, because a corner it remembers can end up over
+/// an inventory window when the dye window closes.
+fn is_palette(frame: &Image, origin: (i32, i32)) -> bool {
+    if !palette::has_frame(frame, origin) {
+        return false;
+    }
+    match frame.sub_image(origin.0, origin.1, CAP_W, CAP_H) {
+        Some(grid) => palette::gradient_percent(&grid) >= MIN_GRADIENT,
+        None => false,
+    }
 }
 
 /// Cut the palette out of a frame, unless it holds something that is not the

@@ -79,7 +79,7 @@ they disappear until a run measures them again.
 
 | Control | Meaning |
 |---|---|
-| `Selected colour` / `Save as�` | Named colours, stored in `presets.txt` next to the executable. The box names the colour you have: a saved name when it matches one, `Custom` otherwise. |
+| `Selected colour` / `Save as…` | Named colours, stored in `presets.txt` next to the executable. The box names the colour you have: a saved name when it matches one, `Custom` otherwise. |
 | `R` `G` `B`, `Hex` | The dye colour. All three stay in sync with the picker. |
 | Colour square + hue strip | Pick the colour visually; the square follows the chosen colour. |
 | `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. |
@@ -150,7 +150,7 @@ The legacy GUI (`legacy\c-reference`) has the field table below.
 
 ## How it works
 
-1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain.
+1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain. The square also has to be ringed by the dye form's one-pixel black line: the client's own windows are squares too, and without that line an inventory panel would do. A cheap pass shortlists corners and only those get the full border test, so locating costs a fraction of a second.
 2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics. The cursor waits below the palette in between, where the client's camera cannot take it.
 3. **Read the sample offsets.** Hovering the grid makes the client draw five markers. Each marker is a **crosshair** (the sample point) joined by a short neck to a **legend box** that shows the colour found there; the box sits 10 px to the right of its crosshair. Measured on every box: `box_fill == gradient[box_centre + (-10, 0)]`, exactly. The samples are then numbered the way the dye window numbers its five previews — 1 under the cursor, 2 and 3 above it, 4 and 5 below — so a chosen slot means the same thing on both sides.
 4. **Watch the palette.** A thread of its own grabs the palette every 500 ms and publishes it, so the picture on screen is always current and the engine's own grabs travel the same path: what is drawn is what was searched. The picture is skipped when it would contain a legend, and the thread stops publishing while a colour is being picked.

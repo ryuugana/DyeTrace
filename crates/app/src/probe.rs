@@ -106,7 +106,9 @@ pub fn run(args: &[String]) -> i32 {
                 continue;
             }
         };
-        if let Some(origin) = palette::find_square_field(&frame).or_else(|| palette::find_field(&frame))
+        if let Some(origin) = palette::find_square_field(&frame)
+            .or_else(|| palette::find_field(&frame))
+            .filter(|origin| palette::has_frame(&frame, *origin))
         {
             let _ = bmp::write_bmp(&opts.out_dir.join("window.bmp"), &frame);
             located = Some((frame, origin));
