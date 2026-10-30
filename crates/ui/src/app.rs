@@ -298,35 +298,25 @@ impl DyeTraceApp {
         ui.add_space(14.0);
         let busy = self.worker.busy;
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(!busy, egui::Button::new("Find field"))
-                .clicked()
-            {
-                self.worker.submit(Job::Find);
-            }
             if ui.add_enabled(!busy, egui::Button::new("Scan")).clicked() {
                 self.worker.submit(Job::Scan(self.options(true)));
             }
-            if ui.add_enabled(!busy, egui::Button::new("Auto")).clicked() {
+            if ui.add_enabled(!busy, egui::Button::new("Start")).clicked() {
                 self.worker.submit(Job::Auto(self.options(false)));
             }
-            if ui.add_enabled(busy, egui::Button::new("Stop")).clicked() {
-                self.worker.request_stop();
-            }
-        });
 
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label("Stop key");
-            if ui.button("Set").clicked() {
-                self.recording = true;
-            }
-            let shown = if self.recording {
-                "press a key".to_string()
-            } else {
-                self.stop_on.name().to_string()
-            };
-            ui.label(RichText::new(shown).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let shown = if self.recording {
+                    "press a key".to_string()
+                } else {
+                    self.stop_on.name().to_string()
+                };
+                ui.label(RichText::new(shown).strong());
+                if ui.button("Set").clicked() {
+                    self.recording = true;
+                }
+                ui.label("Stop key");
+            });
         });
     }
 
@@ -437,7 +427,9 @@ impl DyeTraceApp {
         };
 
         let available = ui.available_size();
-        let side = available.x.min(available.y - 24.0).clamp(160.0, 460.0);
+        let side = available.x.min(available.y).clamp(160.0, 460.0);
+        // The same air above the picture as below it, down to the status bar.
+        ui.add_space(((available.y - side) * 0.5).max(0.0));
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
 
         if snapshot.is_none() {

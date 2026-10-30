@@ -6,15 +6,12 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 use dyetrace_core::image::Rgb;
-use dyetrace_platform::traits::GameWindow;
 use dyetrace_engine::cycle::{self, Options, Scan};
 
 use crate::preview::{Capture, Preview};
 
 #[derive(Clone, Debug)]
 pub enum Job {
-    /// Find the palette and report where it is.
-    Find,
     /// Prepare a search and report the best candidate; never clicks.
     Scan(Options),
     /// Run the whole cycle.
@@ -63,10 +60,6 @@ impl Worker {
         let _ = self.jobs.send(job);
     }
 
-    pub fn request_stop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-    }
-
     pub fn poll(&mut self) -> Vec<Msg> {
         let mut out = Vec::new();
         while let Ok(msg) = self.messages.try_recv() {
@@ -101,24 +94,6 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
     };
 
     match job {
-        Job::Find => {
-            send(Msg::Status("looking for the palette".to_string()));
-            let id = window.find();
-            let found = id.and_then(|id| {
-                window.focus(id);
-                cycle::locate(&window, capture, id)
-            });
-            match found {
-                Some((rect, origin)) => send(Msg::Status(format!(
-                    "palette at ({},{}) in a {}x{} window",
-                    origin.0, origin.1, rect.w, rect.h
-                ))),
-                None => send(Msg::Status(
-                    "no palette - open the dye window and keep it visible".to_string(),
-                )),
-            }
-        }
-
         Job::Scan(mut opts) => {
             opts.stop = Some(Arc::clone(stop));
             send(Msg::Status("scanning".to_string()));

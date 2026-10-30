@@ -21,7 +21,7 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - **Matches by count, not by slot order.** You give one colour, a variance, and how many of the five samples must hold it (1–5).
 - **Shows a live hit map** - a white pane with red where the colour exists, the same view the original presents, refreshed twice a second while the dye window is open. Boxes and numbers mark the sampled positions once a scan has measured them.
 - **Auto mode** runs the whole cycle: `Pick Color` → capture → read offsets → search → click, or `Cancel` and try again. Presses are gated on the button's label, so a dye is never applied by accident.
-- **Stops on demand** with the Stop button or a key you choose: press `Set`, press the key, and it is watched wherever the keyboard focus is.
+- **Stops on demand** with a key you choose: press `Set`, press the key, and it is watched wherever the keyboard focus is.
 - **Self-tests** (`--selftest`) so you can check a build without opening the game.
 
 ## Repository layout
@@ -84,11 +84,10 @@ rolled again they disappear until the next Scan.
 | Colour square + hue strip | Pick the colour visually; the square follows the chosen colour. |
 | `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. |
 | `Dye spots` | How many of the five samples must hold the colour (1–5). Which samples fill that up is where `Slot` comes in. |
-| `Retries` | How many new rolls Auto may try, after the first, before giving up. `0` keeps rolling until a match or Stop. |
+| `Retries` | How many new rolls a run may try, after the first, before giving up. `0` keeps rolling until a match or the stop key. |
 | `Variance ±` | Per-channel tolerance as a number, or drag the slider below it. `0` = exact match. |
-| `Find field` | Locate the palette and report where it is. |
 | `Scan` | Read the client's sample offsets, search, and draw the hit map. Nothing is clicked except Pick Color, and only if the picker is not already armed. |
-| `Auto` | Run the cycle until it clicks a match, or Stop. |
+| `Start` | Run the cycle until it clicks a match or the stop key is pressed. |
 | `Stop key` | `Set` waits for a key press and records it; the key shown beside the button is the one that stops a running cycle. Space by default. It is polled globally, so it works while the game has the keyboard focus. |
 
 The preview is the same view the original presents: white with red where the
