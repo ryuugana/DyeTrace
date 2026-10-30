@@ -40,7 +40,6 @@ pub struct DyeTraceApp {
     worker: Worker,
     scan: Option<Scan>,
     status: String,
-    log: Vec<String>,
     tab: Tab,
 }
 
@@ -68,7 +67,6 @@ impl DyeTraceApp {
             worker: Worker::spawn(),
             scan: None,
             status: "open the dye window in game, then press Find".to_string(),
-            log: Vec::new(),
             tab: Tab::Dye,
         };
         app.set_colour(Rgb::black());
@@ -109,12 +107,6 @@ impl DyeTraceApp {
         for message in self.worker.poll() {
             match message {
                 Msg::Status(text) => self.status = text,
-                Msg::Log(line) => {
-                    self.log.push(line);
-                    if self.log.len() > 200 {
-                        self.log.remove(0);
-                    }
-                }
                 Msg::Scanned(scan) => {
                     self.hit_key = (u32::MAX, 0);
                     self.scan = Some(*scan);
@@ -265,10 +257,6 @@ impl DyeTraceApp {
                 self.worker.request_stop();
             }
         });
-
-        ui.add_space(8.0);
-        ui.separator();
-        ui.label(RichText::new(&self.status).strong());
     }
 
     /// The colour picker, directly under the hex box, with the matching
@@ -440,16 +428,11 @@ impl DyeTraceApp {
         }
     }
 
-    fn log_panel(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .stick_to_bottom(true)
-            .auto_shrink([false, true])
-            .max_height(64.0)
-            .show(ui, |ui| {
-                for line in &self.log {
-                    ui.label(RichText::new(line).monospace().small().weak());
-                }
-            });
+    /// The one line of feedback, along the bottom edge of the window.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.label(RichText::new(&self.status).strong());
+        ui.add_space(6.0);
     }
 
     fn advanced(&mut self, ui: &mut egui::Ui) {
@@ -497,8 +480,8 @@ impl eframe::App for DyeTraceApp {
             });
         });
 
-        egui::TopBottomPanel::bottom("log").show(ctx, |ui| {
-            self.log_panel(ui);
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            self.status_bar(ui);
         });
 
         if self.tab == Tab::Dye {

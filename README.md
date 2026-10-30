@@ -67,7 +67,8 @@ cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
 ## Usage
 
 `dyetrace-ui.exe` is the window: the controls and the colour picker on the
-left, the search preview on the right, and a log along the bottom.
+left, the search preview on the right, and one line of feedback along the
+bottom.
 
 | Control | Meaning |
 |---|---|
@@ -175,7 +176,7 @@ anything, which makes it the safe way to check a C build.
 | `no gradient - open the dye window and leave it visible` | The palette is not on screen, or the client is behind another window. Open the dye window and keep it visible. |
 | `move this window off the palette - it is covering the colours` | DyeTrace is overlapping the gradient; move it aside. |
 | Auto keeps cancelling | The `btn x/y` offsets are not hitting Pick Color / Cancel on your layout. Check them with a screenshot. |
-| The dye window closed itself | A Cancel click landed while the button still read Pick Color. Current builds read the label first and only press Cancel when it reads Start Dyeing; if you see this, report the log lines beginning `button reads`. |
+| The dye window closed itself | A Cancel click landed while the button still read Pick Color. Current builds read the label first and only press Cancel when it reads Start Dyeing; if you see this, run the same job from the command line, which prints the lines beginning `button reads`. |
 | Nothing gets clicked | The client ignores `SetCursorPos` for its hover state; DyeTrace also injects real mouse movement. If the cursor cannot be placed, the status says `auto: cursor did not reach the match - cycle aborted` and the cycle stops rather than clicking blind. |
 | Wrong spot gets picked | Loosen or tighten `variance`, or change `slots`. Compare against the red hit map — it shows exactly what the search sees. |
 

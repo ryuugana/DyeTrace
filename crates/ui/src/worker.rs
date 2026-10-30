@@ -22,7 +22,6 @@ pub enum Job {
 #[derive(Debug)]
 pub enum Msg {
     Status(String),
-    Log(String),
     Scanned(Box<Scan>),
     Finished,
 }
@@ -146,9 +145,7 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
         Job::Auto(mut opts) => {
             opts.stop = Some(Arc::clone(stop));
             send(Msg::Status("auto running - Stop to end".to_string()));
-            let outcome = cycle::run(&window, &screen, &mouse, &opts, |line| {
-                let _ = messages.send(Msg::Log(line.to_string()));
-            });
+            let outcome = cycle::run(&window, &screen, &mouse, &opts, |_| {});
             send(Msg::Status(match outcome {
                 cycle::Outcome::Matched {
                     x,

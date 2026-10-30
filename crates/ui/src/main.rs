@@ -14,8 +14,8 @@ mod worker;
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([640.0, 476.0])
-            .with_min_inner_size([620.0, 460.0])
+            .with_inner_size([640.0, 420.0])
+            .with_min_inner_size([620.0, 400.0])
             .with_title("DyeTrace"),
         ..Default::default()
     };
