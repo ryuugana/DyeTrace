@@ -47,6 +47,9 @@ const COLUMN_GAP: f32 = 12.0;
 const CARD_GAP: f32 = 8.0;
 /// The line a card's heading takes, so a box can be measured around it.
 const HEADING_ROOM: f32 = 26.0;
+/// The height of the button row, and of the box around it.
+const BUTTON_ROW: f32 = 28.0;
+const BUTTONS_HEIGHT: f32 = BUTTON_ROW + 2.0 * 9.0 + 2.0;
 
 /// Run `add` inside a card, and hand back whatever it returned.
 ///
@@ -161,9 +164,9 @@ pub struct DyeTraceApp {
 
     scan: Option<Scan>,
     status: String,
-    /// How tall the preview box came out last frame, so it can be centred on its
-    /// real height instead of an estimate of it.
-    preview_box: f32,
+    /// Where the left column of cards ends, in screen coordinates.  The buttons
+    /// beside the preview are placed to finish on that same line.
+    left_bottom: f32,
 }
 
 impl DyeTraceApp {
@@ -204,7 +207,7 @@ impl DyeTraceApp {
             saved,
             scan: None,
             status: "Watching for the dye window".to_string(),
-            preview_box: 0.0,
+            left_bottom: 0.0,
         };
 
         app.set_colour(app.colour);
@@ -438,7 +441,7 @@ impl DyeTraceApp {
 
         ui.add_space(CARD_GAP);
 
-        card(ui, |ui| {
+        let drawn = card_frame(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     let mut changed = picker::saturation_value_square(
@@ -465,53 +468,54 @@ impl DyeTraceApp {
                 ui.vertical(|ui| self.match_controls(ui));
             });
         });
+        // Where the column ends: the buttons on the right finish level with it.
+        self.left_bottom = drawn.response.rect.max.y;
 
-        ui.add_space(CARD_GAP);
-
-        card(ui, |ui| self.buttons(ui));
     }
 
     /// Start, About, and the key that ends a run.
+    ///
+    /// Drawn right to left so the stop key sits against the right edge of the
+    /// box and Start at the left, whatever width the box has.
     fn buttons(&mut self, ui: &mut egui::Ui) {
         let busy = self.worker.busy;
         let mut start = false;
         let mut about = false;
 
-        ui.horizontal(|ui| {
-            let row = ui.cursor().min.x;
+        // The row is given its own height: without it the right-to-left layout
+        // hands the card all the space that is going, and the box grows to the
+        // bottom of the window.
+        let size = egui::vec2(ui.available_width(), BUTTON_ROW);
+        ui.allocate_ui(size, |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let shown = if self.recording {
+                    "press a key".to_string()
+                } else {
+                    self.stop_on.name().to_string()
+                };
+                ui.label(RichText::new(shown).strong().size(15.0));
+                if ui
+                    .add_sized([40.0, BUTTON_ROW], egui::Button::new("Set"))
+                    .clicked()
+                {
+                    self.recording = true;
+                }
+                ui.label(RichText::new("Stop key").color(Color32::from_gray(170)));
 
-            ui.add_enabled_ui(!busy, |ui| {
-                start = ui
-                    .add_sized(
-                        [64.0, 28.0],
-                        egui::Button::new(RichText::new("Start").strong()),
-                    )
-                    .clicked();
-                about = ui
-                    .add_sized([64.0, 28.0], egui::Button::new("About"))
-                    .clicked();
-            });
+                ui.add_space(18.0);
 
-            // The stop key sits in the same column as the labels above it.
-            let want = row + PICKER_SIDE + COLUMN_GAP;
-            let here = ui.cursor().min.x;
-            if want > here {
-                ui.add_space(want - here);
-            }
-
-            ui.label(RichText::new("Stop key").color(Color32::from_gray(170)));
-            if ui
-                .add_sized([40.0, 28.0], egui::Button::new("Set"))
-                .clicked()
-            {
-                self.recording = true;
-            }
-            let shown = if self.recording {
-                "press a key".to_string()
-            } else {
-                self.stop_on.name().to_string()
-            };
-            ui.label(RichText::new(shown).strong().size(15.0));
+                ui.add_enabled_ui(!busy, |ui| {
+                    about = ui
+                        .add_sized([64.0, BUTTON_ROW], egui::Button::new("About"))
+                        .clicked();
+                    start = ui
+                        .add_sized(
+                            [64.0, BUTTON_ROW],
+                            egui::Button::new(RichText::new("Start").strong()),
+                        )
+                        .clicked();
+                });
+        });
         });
 
         if start {
@@ -799,25 +803,42 @@ impl eframe::App for DyeTraceApp {
                     .inner_margin(egui::Margin::symmetric(8, 6)),
             )
             .show(ctx, |ui| {
-                // The canvas is square, so the card is only as tall as the
-                // picture plus its heading: the picture fills the box instead of
-                // floating in a tall empty one.  The box is then centred on the
-                // height it actually took, measured last frame.
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let space = ui.available_size();
-                let side = (space.x.min(space.y - HEADING_ROOM)
-                    - 2.0 * CARD_MARGIN as f32
-                    - 2.0)
-                    .clamp(160.0, 640.0);
-                let estimate = if self.preview_box > 0.0 {
-                    self.preview_box
-                } else {
-                    side + HEADING_ROOM + 2.0 * 9.0 + 2.0
-                };
-                ui.add_space(((space.y - estimate) * 0.5).max(0.0));
+                let page_top = ui.cursor().min.y;
+                ui.add_space(CARD_GAP);
 
-                let drawn = card_frame(ui, |ui| self.preview_panel(ui, side));
-                self.preview_box = drawn.response.rect.height();
+                // The two columns start and finish on the same lines: the preview
+                // box begins where the first card on the left begins, and the
+                // buttons box ends where the last card on the left ends.
+                let bottom = if self.left_bottom > 0.0 {
+                    self.left_bottom
+                } else {
+                    page_top + space.y
+                };
+
+                // The canvas is square, so its box is only as tall as the picture
+                // and its heading - and it has to leave the buttons their line.
+                let room_for_picture = bottom
+                    - BUTTONS_HEIGHT
+                    - CARD_GAP
+                    - page_top
+                    - CARD_GAP
+                    - HEADING_ROOM
+                    - 2.0 * 9.0
+                    - 2.0;
+                let width_limit = space.x - 2.0 * CARD_MARGIN as f32 - 2.0;
+                let side = room_for_picture.min(width_limit).clamp(160.0, 640.0);
+                card(ui, |ui| self.preview_panel(ui, side));
+
+                // The buttons sit at the foot of the column, level with the
+                // bottom of the picker card across from them.
+                let target = bottom - BUTTONS_HEIGHT;
+                let here = ui.cursor().min.y;
+                if target > here {
+                    ui.add_space(target - here);
+                }
+                card(ui, |ui| self.buttons(ui));
             });
 
         self.about_window(ctx);
