@@ -1,8 +1,8 @@
 //! The colour test and the match mask.
 //!
-//! The original scans the palette once per colour and stores a mask byte, so a
-//! pixel can be claimed by the "primary" colour (10) or by any other (1), and
-//! a primary claim is never overwritten.
+//! The palette is scanned once per colour into a mask byte, so a pixel can be
+//! claimed by the "primary" colour (10) or by any other (1), and a primary claim
+//! is never overwritten.
 
 use crate::image::{Image, Rgb};
 use crate::{SCAN_H, SCAN_W};

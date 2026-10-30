@@ -34,7 +34,8 @@ pub const SCAN_H: usize = 254;
 /// Dye slots the client samples.
 pub const MAX_TARGETS: usize = 5;
 
-/// Fewest offsets that still make a usable table (the original assumes 4 or 5).
+/// Fewest offsets that still make a usable table: the client draws five, but
+/// one can be clipped by the palette's edge.
 pub const MIN_SLOTS: usize = 4;
 
 /// Distance from a legend box centre to the crosshair it belongs to.

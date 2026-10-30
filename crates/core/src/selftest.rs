@@ -1,5 +1,5 @@
-//! The twelve behaviour checks, ported from the C reference implementation so
-//! the two can be compared directly.
+//! The twelve behaviour checks: the matcher, the palette detector, the offsets
+//! and the search, each pinned to what was measured on the client.
 
 use crate::colour::{MatchMap, COL_RED};
 use crate::image::{Image, Rgb};

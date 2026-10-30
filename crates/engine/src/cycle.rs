@@ -147,7 +147,7 @@ impl Scan {
         )
     }
 
-    /// The preview the original draws: white with red where the colour is.
+    /// The preview: white with red where the colour is.
     pub fn hit_map(&self, colour: Rgb, variance: u8) -> Vec<u32> {
         search::hit_map(&self.grid, colour, variance)
     }

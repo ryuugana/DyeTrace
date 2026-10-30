@@ -2,7 +2,7 @@
 
 **An open-source dye palette finder for Mabinogi** — pick the colour you want, and it finds the spot in the dye gradient that produces it, then clicks it for you.
 
-Windows · C (Win32) · single 32-bit executable · no runtime dependencies
+Windows · Rust · single executable · no runtime dependencies
 
 ![DyeTrace scanning a dye palette](docs/captures/ui.png)
 
@@ -10,18 +10,18 @@ Windows · C (Win32) · single 32-bit executable · no runtime dependencies
 
 ## Why this exists
 
-DyeLite is used by a lot of players, but its source code was never published anywhere. DyeTrace is an open-source take on it: the same core workflow — choose a colour, find where it exists in the dye gradient, apply it — rebuilt from scratch and documented, with the minimum capabilities of the original.
+DyeLite is used by a lot of players, but its source code was never published anywhere. DyeTrace is an open-source take on it: the same core workflow — choose a colour, find where it exists in the dye gradient, apply it — rebuilt from scratch and documented, with the minimum capabilities of DyeLite.
 
-It is not a byte-for-byte port. It reproduces the behaviour by reading the screen the same way the original does, and the parts that matter (how the dye window samples the palette, how a match is scored) were measured against the live client and cross-checked against the original binary.
+It is not a byte-for-byte port. It reproduces the behaviour by reading the screen the same way DyeLite does, and the parts that matter (how the dye window samples the palette, how a match is scored) were measured against the live client and cross-checked against DyeLite's own output.
 
 ## What it does
 
 - **Finds the dye palette automatically** inside the Mabinogi window.
 - **Reads the five sample offsets from the client itself** every attempt, instead of assuming a fixed spacing. The offsets are not universal — they depend on the dye/part set.
 - **Matches by count, not by slot order.** You give one colour, a variance, and how many of the five samples must hold it (1–5).
-- **Shows a live hit map** - a white pane with red where the colour exists, the same view the original presents, refreshed twice a second while the dye window is open. Boxes and numbers mark the sampled positions once a scan has measured them.
+- **Shows a live hit map** - a white pane with red where the colour exists, refreshed ten times a second while the dye window is open. Boxes and numbers mark the sampled positions once a scan has measured them.
 - **Auto mode** runs the whole cycle: `Pick Color` → capture → read offsets → search → click, or `Cancel` and try again. Presses are gated on the button's label, so a dye is never applied by accident.
-- **Stops on demand** with a key you choose: press `Set`, press the key, and it is watched wherever the keyboard focus is.
+- **Stops on demand** with a key you choose: press `Stop Key`, press the key, and it is watched wherever the keyboard focus is.
 - **Self-tests** (`--selftest`) so you can check a build without opening the game.
 
 ## Repository layout
@@ -32,36 +32,19 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - `crates/app` - the CLI: `--selftest`, `--replay`, `--probe`, `--snapshot`, `--auto`
 - `crates/engine` - the dye cycle itself, shared by the CLI and the window
 - `crates/ui` - the windowed interface (egui): colour picker, presets, hit map
-- `legacy/c-reference` - the single-file C reference implementation (`dyetrace.c`, `build.bat`) that the Rust port was verified against
 
 ## Requirements
 
-- Windows (the binary is x86; it runs fine on 64-bit Windows).
+- Windows 10 or later.
 - Mabinogi running in a **window** (not exclusive fullscreen), with the dye window open and the palette visible.
 - The client must be the foreground window: DyeTrace reads the palette from the screen.
 
 ## Build
 
-The Rust implementation (recommended):
-
 ```bat
 cargo build --release     :: target\release\dyetrace.exe     (CLI)
                           :: target\release\dyetrace-ui.exe  (window)
 cargo test                :: behaviour checks + offset/search/backend tests
-```
-
-The C reference, kept for parity work (needs MSVC):
-
-```bat
-cd legacy\c-reference
-build.bat
-```
-
-or directly:
-
-```bat
-cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
-   /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib
 ```
 
 ## Usage
@@ -88,11 +71,11 @@ they disappear until a run measures them again.
 | `Variance ±` | Per-channel tolerance as a number, or drag the slider below it. `0` = exact match. |
 | `Start` | Run the cycle until it clicks a match or the stop key is pressed. |
 | `About` | What the tool does, the short version of the steps, and the repository link. |
-| `Stop key` | `Set` waits for a key press and records it; the key shown beside the button is the one that stops a running cycle. Space by default. It is polled globally, so it works while the game has the keyboard focus. |
+| `Stop Key` | Press it, then press the key you want: the key shown beside the button is the one that stops a running cycle. Space by default. It is polled globally, so it works while the game has the keyboard focus. |
 
-The preview is the same view the original presents: white with red where the
-colour exists, blue squares for the client's legend, numbered points for the five
-samples and a green crosshair on the best position.
+The preview is white with red where the colour exists, blue squares for the
+client's legend, numbered points for the five samples and a green crosshair on
+the best position.
 
 ### Slots and spots together
 
@@ -134,33 +117,27 @@ than luminance 130 and the grey one none - and acts on what it says:
 Auto raises the client before it looks for anything, and every Cancel is
 confirmed by reading the label back.
 
-The legacy GUI (`legacy\c-reference`) has the field table below.
+The window is driven with:
 
-| Field | Meaning |
-|---|---|
-| `colour #` | The dye colour as hex (`000000`, `C1663A`, …). |
-| `variance` | Per-channel tolerance. `0` = exact match. |
-| `slots` | How many of the five samples must hold the colour (1–5). Which sample holds it does not matter. |
-| `btn x/y` | Offsets of the client's **Pick Color** / **Cancel** buttons from the palette's top-left corner. Only needed if your UI layout differs. |
-
-1. **Pick col** to take the colour under your cursor, or type the hex yourself.
-2. **Find field** — locates the palette and reports the gradient it found (`colour field found at (x,y) gradient 80%`).
-3. **Scan** — puts the cursor on the grid, reads the sample offsets, and searches. The status line reports the result, e.g. `3 of 5 samples hold #000000 (need 3) - cursor to (148,80) dist=0`.
-4. **Auto** — runs the cycle until it finds and clicks a match. Spacebar or **Stop** ends it.
+1. Pick the colour - the swatch, the R/G/B boxes, the hex field, or a saved name.
+2. Choose **Dye spots**, and optionally the slots that must hold it.
+3. Press **Start**. The window marks the samples it reads and then rolls until
+   it finds a match, a stop, or the retries run out.
+4. **Stop Key** records a different key to stop a run with.
 
 ## How it works
 
 1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain. The square also has to be ringed by the dye form's one-pixel black line: the client's own windows are squares too, and without that line an inventory panel would do. A cheap pass shortlists corners and only those get the full border test, so locating costs a fraction of a second.
 2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics. The cursor waits below the palette in between, where the client's camera cannot take it.
 3. **Read the sample offsets.** Hovering the grid makes the client draw five markers. Each marker is a **crosshair** (the sample point) joined by a short neck to a **legend box** that shows the colour found there; the box sits 10 px to the right of its crosshair. Measured on every box: `box_fill == gradient[box_centre + (-10, 0)]`, exactly. The samples are then numbered the way the dye window numbers its five previews — 1 under the cursor, 2 and 3 above it, 4 and 5 below — so a chosen slot means the same thing on both sides.
-4. **Watch the palette.** A thread of its own grabs the palette every 500 ms and publishes it, so the picture on screen is always current and the engine's own grabs travel the same path: what is drawn is what was searched. The picture is skipped when it would contain a legend, and the thread stops publishing while a colour is being picked.
+4. **Watch the palette.** A thread of its own grabs the palette every 100 ms and publishes it, so the picture on screen is always current and the engine's own grabs travel the same path: what is drawn is what was searched. The picture is skipped when it would contain a legend, and the thread stops publishing while a colour is being picked.
 5. **Tell one roll from another.** Each published palette carries a coarse signature (the average colour of a 32x32 grid). A scan records the signature it measured, and its offsets are only drawn while the palette still matches — a rolled palette means the offsets are unknown.
-4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. The chosen slots narrow where the hits may come from, as described above; a position only counts when every guaranteed slot holds the colour as well as the spot count being met.
-5. **Act.** Move the cursor to the match and click — or click `Cancel` and start over.
+6. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. The chosen slots narrow where the hits may come from, as described above; a position only counts when every guaranteed slot holds the colour as well as the spot count being met.
+7. **Act.** Move the cursor to the match and click — or click `Cancel` and start over.
 
 ## Command line
 
-The Rust build (`target\release\dyetrace.exe`):
+The command line (`target\release\dyetrace.exe`):
 
 ```bat
 dyetrace --selftest                      :: the twelve behaviour checks -> selftest.txt
@@ -173,18 +150,13 @@ dyetrace --replay <clean.bmp> [<hover.bmp>] :: run the pipeline against saved fr
 dyetrace --snapshot <out.bmp>             :: capture the primary screen
 ```
 
-The C reference (`legacy\c-reference`) keeps its GUI plus `--selftest`, `--probe`
-and `--autotest`.  `--autotest` there drives the whole cycle, writes
-`autotest.txt`, and re-rolls the dye colours (Pick Color) but never applies
-anything, which makes it the safe way to check a C build.
-
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | `no gradient - open the dye window and leave it visible` | The palette is not on screen, or the client is behind another window. Open the dye window and keep it visible. |
 | `move this window off the palette - it is covering the colours` | DyeTrace is overlapping the gradient; move it aside. |
-| Auto keeps cancelling | The `btn x/y` offsets are not hitting Pick Color / Cancel on your layout. Check them with a screenshot. |
+| Auto keeps cancelling | The button offsets built into the engine are not hitting Pick Color / Cancel on your layout. Check them with a screenshot. |
 | The dye window closed itself | A Cancel click landed while the button still read Pick Color. Current builds read the label first and only press Cancel when it reads Start Dyeing; if you see this, run the same job from the command line, which prints the lines beginning `button reads`. |
 | Nothing gets clicked | The client ignores `SetCursorPos` for its hover state; DyeTrace also injects real mouse movement. If the cursor cannot be placed, the status says `auto: cursor did not reach the match - cycle aborted` and the cycle stops rather than clicking blind. |
 | Wrong spot gets picked | Loosen or tighten `variance`, or change `slots`. Compare against the red hit map — it shows exactly what the search sees. |
@@ -192,19 +164,17 @@ anything, which makes it the safe way to check a C build.
 ## Limitations
 
 - Windows only, and it reads the screen: the palette must be visible and unobstructed.
-- One colour per run. The original supported a different colour per slot; DyeTrace matches a single colour against N of the five samples.
-- No profiles or saved colour sets yet — settings live in the window.
-- Only tested against the current English client; button offsets are configurable for other layouts.
+- One colour per run. DyeLite allows a different colour per slot; DyeTrace matches a single colour against N of the five samples.
+- No profiles: one set of settings, kept in `config.txt`, and one list of named colours in `presets.txt`.
+- Only tested against the current English client; the button offsets live in `Options` if a layout differs.
 - The UI is English only.
 
 ## Files it writes
 
 | File | Contents |
 |---|---|
-| `scan.log` | One line per scan: marker positions, offsets used, sampled colours, and the confirmation reading. Useful when reporting a problem. |
 | `selftest.txt` | Output of `--selftest`. |
 | `probe.txt`, `*.bmp` | Output of `--probe` (palette detection diagnostics). |
-| `autotest.txt` | Output of `--autotest`. |
 | `config.txt` | The window's own settings, next to the executable: colour, dye spots, retries, variance, chosen slots and the stop key. Written as soon as any of them changes. |
 | `presets.txt` | The named colours, one name and hex per line. |
 

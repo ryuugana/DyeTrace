@@ -32,7 +32,7 @@ impl Rgb {
         ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
     }
 
-    /// Rec.601-ish luminance, the same weights the C version uses.
+    /// Rec.601-ish luminance, weighted towards green the way the eye is.
     pub const fn luminance(self) -> i32 {
         ((self.r as i32) * 77 + (self.g as i32) * 151 + (self.b as i32) * 28) >> 8
     }

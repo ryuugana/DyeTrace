@@ -265,7 +265,7 @@ pub fn search_need(
     }
 }
 
-/// The preview picture the original draws: white, with red where the colour is.
+/// The preview picture: white, with red where the colour is.
 pub fn hit_map(grid: &Image, want: Rgb, tolerance: u8) -> Vec<u32> {
     let mut out = vec![crate::colour::COL_WHITE; SCAN_W * SCAN_H];
     for y in 0..SCAN_H {

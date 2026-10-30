@@ -1,6 +1,5 @@
 #![cfg(windows)]
-//! Win32 backend: the same calls the C version makes, behind the three
-//! platform traits.
+//! Win32 backend: the calls the client needs, behind the three platform traits.
 //!
 //! * [`WinScreen`] - `BitBlt` from the screen into a DIB section
 //! * [`WinMouse`] - `SetCursorPos` plus an injected absolute move, then a
