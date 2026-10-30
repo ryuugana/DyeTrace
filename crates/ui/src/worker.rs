@@ -164,7 +164,11 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
                     hex(opts.colour)
                 ),
                 cycle::Outcome::Exhausted { cycles } => {
-                    format!("no match after {cycles} cycle(s)")
+                    if stop.load(Ordering::Relaxed) {
+                        format!("stopped after {cycles} cycle(s)")
+                    } else {
+                        format!("no match after {cycles} cycle(s)")
+                    }
                 }
                 cycle::Outcome::NoClient => "client or gradient not found".to_string(),
                 cycle::Outcome::PointerLost { cycles } => {

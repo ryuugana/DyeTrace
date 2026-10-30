@@ -1,6 +1,7 @@
 //! The window: controls on the left, colour picker and match preview on the
 //! right.
 
+use crate::hotkey::{self, StopKey};
 use crate::hsv;
 use crate::picker::{self, PickerTextures};
 use crate::presets::Presets;
@@ -56,8 +57,14 @@ pub struct DyeTraceApp {
 
     preview: Preview,
     worker: Worker,
+    stop_key: StopKey,
+    /// The key the player picked to stop a cycle.
+    stop_on: egui::Key,
+    /// Waiting for the player to press the key they want.
+    recording: bool,
     scan: Option<Scan>,
     status: String,
+
 }
 
 impl DyeTraceApp {
@@ -68,6 +75,9 @@ impl DyeTraceApp {
             .options_mut(|options| options.theme_preference = egui::ThemePreference::Dark);
 
         let preview = Preview::spawn();
+        let worker = Worker::spawn(&preview);
+        let stop_key = StopKey::watch(worker.stop_flag().expect("worker stop flag"));
+
         let mut app = Self {
             colour: Rgb::black(),
             hex_text: "000000".to_string(),
@@ -83,8 +93,11 @@ impl DyeTraceApp {
             textures: PickerTextures::default(),
             hit_texture: None,
             hit_key: (u32::MAX, 0, 0),
-            worker: Worker::spawn(&preview),
             preview,
+            worker,
+            stop_key,
+            stop_on: hotkey::default_key(),
+            recording: false,
             scan: None,
             status: "watching for the dye window".to_string(),
         };
@@ -102,6 +115,27 @@ impl DyeTraceApp {
         }
         self.saturation = s;
         self.value = v;
+    }
+
+    /// Take the next key the player presses as the stop key.
+    fn capture_stop_key(&mut self, ctx: &egui::Context) {
+        let pressed = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    ..
+                } => Some(*key),
+                _ => None,
+            })
+        });
+
+        let Some(key) = pressed else { return };
+        if let Some(code) = hotkey::virtual_key(key) {
+            self.stop_on = key;
+            self.stop_key.set(code);
+            self.recording = false;
+        }
     }
 
     fn colour_from_picker(&mut self) {
@@ -279,6 +313,20 @@ impl DyeTraceApp {
             if ui.add_enabled(busy, egui::Button::new("Stop")).clicked() {
                 self.worker.request_stop();
             }
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label("Stop key");
+            if ui.button("Set").clicked() {
+                self.recording = true;
+            }
+            let shown = if self.recording {
+                "press a key".to_string()
+            } else {
+                self.stop_on.name().to_string()
+            };
+            ui.label(RichText::new(shown).strong());
         });
     }
 
@@ -500,6 +548,10 @@ impl DyeTraceApp {
 impl eframe::App for DyeTraceApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_worker(ctx);
+
+        if self.recording {
+            self.capture_stop_key(ctx);
+        }
 
         // The palette is watched on its own thread; wake up often enough to show
         // what it found.

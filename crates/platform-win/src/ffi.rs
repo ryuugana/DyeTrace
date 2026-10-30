@@ -90,6 +90,9 @@ extern "system" {
     pub fn SetCursorPos(x: i32, y: i32) -> BOOL;
     pub fn mouse_event(flags: u32, dx: u32, dy: u32, data: u32, extra: usize);
 
+    /// Whether a key is down, wherever the keystroke is going.
+    pub fn GetAsyncKeyState(key: i32) -> i16;
+
     pub fn FindWindowA(class: *const u8, title: *const u8) -> HWND;
     pub fn PrintWindow(hwnd: HWND, hdc: HDC, flags: u32) -> BOOL;
     pub fn IsWindow(hwnd: HWND) -> BOOL;
