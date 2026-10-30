@@ -265,6 +265,44 @@ fn every_chosen_slot_must_hold_the_colour() {
 }
 
 #[test]
+fn three_chosen_slots_and_three_spots_need_all_three() {
+    // The stand-in's colour exists at one position only, so three chosen slots
+    // can never all hold it - and no click may be sent.
+    let client = Client::new(true);
+    let opts = Options {
+        colour: Rgb::new(0x51, 0x51, 0x80),
+        slots: 3,
+        slots_only: vec![0, 2, 4],
+        max_cycles: 1,
+        ..Options::default()
+    };
+
+    let mut lines = Vec::new();
+    let outcome = cycle::run(&client, &client, &client, &opts, |line| {
+        lines.push(line.to_string())
+    });
+
+    assert!(
+        matches!(outcome, cycle::Outcome::Exhausted { .. }),
+        "unexpected outcome {outcome:?}\n{lines:#?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("best=") && line.contains("short of it")),
+        "the log should say what it found and that it was short: {lines:#?}"
+    );
+    assert!(
+        client
+            .clicks()
+            .iter()
+            .all(|at| near(*at, pick_button()) || near(*at, cancel_button())),
+        "clicked the gradient: {:?}",
+        client.clicks()
+    );
+}
+
+#[test]
 fn an_armed_window_is_used_without_pressing_anything() {    let client = Client::new(true);
 
     let scan = cycle::scan_once(&client, &client, &client, &Options::default())

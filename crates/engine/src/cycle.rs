@@ -85,8 +85,12 @@ pub enum Outcome {
         cycles: usize,
         x: i32,
         y: i32,
+        /// How many of the samples the search looked at held the colour.
         count: usize,
+        /// How many samples the search looked at.
         samples: usize,
+        /// Whether the search was limited to the chosen slots.
+        chosen_only: bool,
         clicked: bool,
     },
     Exhausted {
@@ -117,6 +121,8 @@ pub struct Scan {
     /// window numbers its previews: 0 is the sample under the pointer, 1 and 2
     /// are above it, 3 and 4 below.
     pub slots: Vec<usize>,
+    /// How many samples the search actually looked at.
+    pub asked: usize,
     /// Best candidate and its score.
     pub best: Option<search::Match>,
     /// Whether this scan had to arm the picker itself.
@@ -465,8 +471,8 @@ pub fn scan_once(
 ) -> Result<Scan, ScanFail> {
     let id = window.find().ok_or(ScanFail::NoClient)?;
     let prep = prepare(window, screen, mouse, id, opts, &mut |_: &str| {})?;
-    let (colours, _) = wanted(opts, &prep);
-    let best = search::search_with(&prep.grid, &prep.table, &colours, opts.variance);
+    let need = need_for(opts, &prep);
+    let best = search::search_need(&prep.grid, &prep.table, &need, opts.variance).map(|found| found.at);
 
     Ok(Scan {
         rect: prep.board.rect,
@@ -476,6 +482,7 @@ pub fn scan_once(
         boxes: prep.boxes,
         table: prep.table,
         slots: prep.slots,
+        asked: need.asked(),
         best,
         armed: prep.armed,
     })
@@ -522,10 +529,9 @@ fn cancel_roll(
     false
 }
 
-/// The colours to look for, one entry per measured sample, and how many of them
-/// must hold it.  Chosen slots take priority over the slot count, and are looked
-/// up through the scan's slot map so a partial read cannot shift them.
-fn wanted(opts: &Options, prep: &Prepared) -> (Vec<Option<Rgb>>, usize) {
+/// What the search has to satisfy for these options.  Chosen slots are resolved
+/// through the scan's slot map, so a partial read cannot shift them.
+fn need_for(opts: &Options, prep: &Prepared) -> search::Need {
     let chosen: Vec<usize> = opts
         .slots_only
         .iter()
@@ -534,21 +540,14 @@ fn wanted(opts: &Options, prep: &Prepared) -> (Vec<Option<Rgb>>, usize) {
     search::plan(prep.table.len(), opts.colour, opts.slots, &chosen)
 }
 
-/// "1, 3, 5" - the slot numbers a player recognises, from 0-based slots.
-pub fn slot_list(slots: &[usize]) -> String {
-    let mut numbers: Vec<usize> = slots.iter().map(|slot| slot + 1).collect();
-    numbers.sort();
-    numbers.dedup();
-    let parts: Vec<String> = numbers.iter().map(|n| n.to_string()).collect();
-    parts.join(", ")
-}
-
-/// "slot 2 holds" or "slots 1, 3, 5 hold".
-pub fn slot_phrase(slots: &[usize]) -> String {
-    if slots.len() == 1 {
-        format!("slot {} holds", slots[0] + 1)
+/// "2/3 chosen slots hold" or "2/5 samples hold".  `chosen_only` says whether
+/// the search was limited to the chosen slots, which is the only case where the
+/// count is over them rather than over every sample.
+pub fn found_phrase(count: usize, asked: usize, chosen_only: bool) -> String {
+    if chosen_only {
+        format!("{count}/{asked} chosen slots hold")
     } else {
-        format!("slots {} hold", slot_list(slots))
+        format!("{count}/{asked} samples hold")
     }
 }
 
@@ -621,34 +620,23 @@ pub fn run(
             prep.pointer.1
         ));
 
-        let (colours, need) = wanted(opts, &prep);
-        if let Some(best) = search::search_with(&prep.grid, &prep.table, &colours, opts.variance) {
-            let chosen: Vec<usize> = opts
-                .slots_only
-                .iter()
-                .copied()
-                .filter(|slot| prep.slots.contains(slot))
-                .collect();
-            if chosen.is_empty() {
-                report(&format!(
-                    "  best=({},{}) {}/{} need={need}",
-                    best.x,
-                    best.y,
-                    best.count,
-                    prep.table.len()
-                ));
-            } else {
-                report(&format!(
-                    "  best=({},{}) {} it",
-                    best.x,
-                    best.y,
-                    slot_phrase(&chosen)
-                ));
-            }
+        let need = need_for(opts, &prep);
+        // A search limited to the chosen slots reports against them; otherwise
+        // the count is over all the samples that were asked.
+        let chosen_only = need.asked() < prep.table.len();
+        if let Some(found) = search::search_need(&prep.grid, &prep.table, &need, opts.variance) {
+            report(&format!(
+                "  best=({},{}) {} need {}{}",
+                found.at.x,
+                found.at.y,
+                found_phrase(found.at.count, need.asked(), chosen_only),
+                need.count,
+                if found.met { "" } else { " - short of it" }
+            ));
 
-            if best.count >= need && prep.table.len() >= MIN_SLOTS {
+            if found.met && prep.table.len() >= MIN_SLOTS {
                 window.focus(id);
-                let (mx, my) = button(&prep.board, best.x, best.y);
+                let (mx, my) = button(&prep.board, found.at.x, found.at.y);
                 if !mouse.move_to(mx, my) {
                     report("  pointer did not reach the match - not clicking");
                     return Outcome::PointerLost { cycles };
@@ -665,8 +653,9 @@ pub fn run(
                     cycles,
                     x: mx,
                     y: my,
-                    count: best.count,
-                    samples: prep.table.len(),
+                    count: found.at.count,
+                    samples: need.asked(),
+                    chosen_only: chosen_only,
                     clicked: !opts.dry_run,
                 };
             }

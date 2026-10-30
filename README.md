@@ -74,8 +74,8 @@ left, the search preview on the right, and a log along the bottom.
 | `Selected colour` / `Save as…` | Named colours, stored in `presets.txt` next to the executable. |
 | `R` `G` `B`, `Hex` | The dye colour. All three stay in sync with the picker. |
 | Colour square + hue strip | Pick the colour visually; the square follows the chosen colour. |
-| `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked (1 3 5) and then all of them must match. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. Takes priority over `Dye spots`. |
-| `Dye spots` | How many of the five samples must hold the colour (1–5). Which sample holds it does not matter. |
+| `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. |
+| `Dye spots` | How many of the five samples must hold the colour (1–5). Which samples fill that up is where `Slot` comes in. |
 | `Variance ±` | Per-channel tolerance as a number, or drag the slider below it. `0` = exact match. |
 | `Find field` | Locate the palette and report where it is. |
 | `Scan` | Read the client's sample offsets, search, and draw the hit map. Nothing is clicked except Pick Color, and only if the picker is not already armed. |
@@ -83,8 +83,26 @@ left, the search preview on the right, and a log along the bottom.
 | `Advanced` | Tab reserved for offsets, timings and per-slot colours. |
 
 The preview is the same view the original presents: white with red where the
-colour exists, blue squares for the client's legend, grey points for the five
+colour exists, blue squares for the client's legend, numbered points for the five
 samples and a green crosshair on the best position.
+
+### Slots and spots together
+
+`Dye spots` says how many of the five samples must hold the colour; the slot
+buttons say where those hits may come from.
+
+| Chosen slots | Rule |
+|---|---|
+| none | any `Dye spots` of the five will do |
+| fewer than spots | every chosen slot must hold it, and the rest of the spots can come from any other sample |
+| as many as spots | every chosen slot must hold it |
+| more than spots | only the chosen slots are asked, and any `Dye spots` of them will do |
+
+For example, slot 2 with 3 spots needs slot 2 plus two of the others; slots
+1 3 5 with 3 spots needs all three; slots 1 3 5 with 2 spots needs any two of the
+three. A chosen slot the legend did not show is ignored, and a position is only
+clicked when the whole rule is satisfied - a near miss is logged with
+`- short of it` and the attempt rolls on.
 
 ### The dye window's buttons
 
@@ -127,7 +145,7 @@ The legacy GUI (`legacy\c-reference`) has the field table below.
 1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain.
 2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics. The cursor waits below the palette in between, where the client's camera cannot take it.
 3. **Read the sample offsets.** Hovering the grid makes the client draw five markers. Each marker is a **crosshair** (the sample point) joined by a short neck to a **legend box** that shows the colour found there; the box sits 10 px to the right of its crosshair. Measured on every box: `box_fill == gradient[box_centre + (-10, 0)]`, exactly. The samples are then numbered the way the dye window numbers its five previews — 1 under the cursor, 2 and 3 above it, 4 and 5 below — so a chosen slot means the same thing on both sides.
-4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. Picking slots replaces the count with a single test: only the chosen samples are asked for the colour, and all of them must match.
+4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. The chosen slots narrow where the hits may come from, as described above; a position only counts when every guaranteed slot holds the colour as well as the spot count being met.
 5. **Act.** Move the cursor to the match and click — or click `Cancel` and start over.
 
 ## Command line

@@ -48,59 +48,109 @@ fn best_position_wins_on_count() {
 }
 
 #[test]
-fn a_chosen_slot_overrides_the_slot_count() {
+fn without_a_choice_the_spot_count_decides() {
     let want = Rgb::new(1, 2, 3);
-    let (colours, need) = search::plan(5, want, 4, &[2]);
+    let need = search::plan(5, want, 3, &[]);
 
-    assert_eq!(need, 1, "one sample is enough when one is chosen");
-    assert_eq!(colours.len(), 5);
-    assert_eq!(colours[2], Some(want));
-    assert_eq!(colours.iter().filter(|c| c.is_some()).count(), 1);
+    assert_eq!(need.count, 3);
+    assert_eq!(need.asked(), 5);
+    assert!(need.must.is_empty());
+    assert!(need.colours.iter().all(|colour| *colour == Some(want)));
 }
 
 #[test]
-fn several_chosen_slots_must_all_hold_the_colour() {
+fn fewer_slots_than_spots_guarantee_the_chosen_ones() {
+    // Slot 2 chosen, three spots: slot 2 must match, and two more may come from
+    // anywhere.
     let want = Rgb::new(1, 2, 3);
-    let (colours, need) = search::plan(5, want, 4, &[0, 2, 4]);
+    let need = search::plan(5, want, 3, &[1]);
 
-    assert_eq!(need, 3);
-    assert_eq!(colours[0], Some(want));
-    assert_eq!(colours[2], Some(want));
-    assert_eq!(colours[4], Some(want));
-    assert_eq!(colours[1], None);
-    assert_eq!(colours[3], None);
+    assert_eq!(need.count, 3);
+    assert_eq!(need.asked(), 5);
+    assert_eq!(need.must, vec![1]);
 }
 
 #[test]
-fn without_a_choice_the_count_decides() {
+fn as_many_slots_as_spots_guarantee_each_one() {
     let want = Rgb::new(1, 2, 3);
-    let (colours, need) = search::plan(5, want, 3, &[]);
+    let need = search::plan(5, want, 3, &[0, 2, 4]);
 
-    assert_eq!(need, 3);
-    assert!(colours.iter().all(|c| *c == Some(want)));
+    assert_eq!(need.count, 3);
+    assert_eq!(need.must, vec![0, 2, 4]);
+    assert_eq!(need.asked(), 5);
 }
 
 #[test]
-fn a_slot_the_table_does_not_have_falls_back_to_the_count() {
-    let (colours, need) = search::plan(4, Rgb::new(1, 2, 3), 2, &[4]);
+fn more_slots_than_spots_only_count_the_chosen_ones() {
+    // Slots 1, 3 and 5 chosen with two spots: any two of the three will do.
+    let want = Rgb::new(1, 2, 3);
+    let need = search::plan(5, want, 2, &[0, 2, 4]);
 
-    assert_eq!(need, 2);
-    assert_eq!(colours.len(), 4);
-    assert!(colours.iter().all(|c| c.is_some()));
+    assert_eq!(need.count, 2);
+    assert!(need.must.is_empty());
+    assert_eq!(need.asked(), 3);
+    assert_eq!(need.colours[0], Some(want));
+    assert_eq!(need.colours[1], None);
+    assert_eq!(need.colours[2], Some(want));
+    assert_eq!(need.colours[3], None);
+    assert_eq!(need.colours[4], Some(want));
 }
 
 #[test]
-fn only_the_reachable_chosen_slots_are_asked_for() {
-    let want = Rgb::new(1, 2, 3);
-    let (colours, need) = search::plan(3, want, 5, &[1, 4]);
+fn a_slot_the_table_does_not_have_falls_back_to_the_spot_count() {
+    let need = search::plan(4, Rgb::new(1, 2, 3), 2, &[4]);
 
-    assert_eq!(need, 1);
-    assert_eq!(colours[1], Some(want));
-    assert_eq!(colours.iter().filter(|c| c.is_some()).count(), 1);
+    assert_eq!(need.count, 2);
+    assert_eq!(need.asked(), 4);
+    assert!(need.must.is_empty());
 }
 
 #[test]
 fn the_requirement_cannot_exceed_the_table() {
-    let (_, need) = search::plan(3, Rgb::black(), 5, &[]);
-    assert_eq!(need, 3);
+    let need = search::plan(3, Rgb::black(), 5, &[]);
+    assert_eq!(need.count, 3);
+}
+
+#[test]
+fn a_guaranteed_slot_that_does_not_match_rejects_the_position() {
+    // Colour at (10,10) only. Slot 1 is the pointer itself, so the only
+    // candidate is (10,10); asking for slot 2 as well moves the sample 5 px up
+    // and finds nothing.
+    let mut grid = Image::filled(256, 256, Rgb::black());
+    let want = Rgb::new(210, 30, 30);
+    grid.put(10, 10, want);
+
+    let offsets = [(0, 0), (0, -5)];
+    let one = search::plan(2, want, 1, &[0]);
+    let found = search::search_need(&grid, &offsets, &one, 0).expect("one slot");
+    assert!(found.met);
+    assert_eq!((found.at.x, found.at.y), (10, 10));
+
+    grid.put(10, 5, want);
+    let both = search::plan(2, want, 2, &[0, 1]);
+    let found = search::search_need(&grid, &offsets, &both, 0).expect("both slots");
+    assert!(found.met);
+    assert_eq!((found.at.x, found.at.y), (10, 10));
+
+    grid.put(10, 5, Rgb::black());
+    let found = search::search_need(&grid, &offsets, &both, 0).expect("a best effort");
+    assert!(!found.met, "slot 2 no longer holds the colour");
+    assert_eq!(found.at.count, 1);
+}
+
+#[test]
+fn more_chosen_slots_than_spots_accepts_any_subset() {
+    let mut grid = Image::filled(256, 256, Rgb::black());
+    let want = Rgb::new(210, 30, 30);
+
+    // Three chosen samples; only two of them hold the colour at (40, 40).
+    grid.put(40, 40, want);
+    grid.put(40, 36, want);   // sample 2 is 4 px up
+    let offsets = [(0, 0), (0, -4), (0, -30)];
+    let need = search::plan(3, want, 2, &[0, 1, 2]);
+
+    let found = search::search_need(&grid, &offsets, &need, 0).expect("two of three is enough");
+    assert!(found.met);
+    assert_eq!((found.at.x, found.at.y), (40, 40));
+    assert_eq!(found.at.count, 2);
 }

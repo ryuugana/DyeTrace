@@ -109,29 +109,160 @@ pub fn search(grid: &Image, offsets: &[(i32, i32)], want: Rgb, tolerance: u8) ->
     search_with(grid, offsets, &colours, tolerance)
 }
 
-/// What a search should ask for: one colour per sample, and how many of them
-/// must hold it.
+/// What a search has to satisfy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Need {
+    /// The colour asked for at each sample; `None` leaves that sample out of
+    /// the count.
+    pub colours: Vec<Option<Rgb>>,
+    /// How many of the asked samples must hold the colour.
+    pub count: usize,
+    /// Samples that must hold it whatever the count says.
+    pub must: Vec<usize>,
+}
+
+impl Need {
+    /// How many samples are asked for the colour.
+    pub fn asked(&self) -> usize {
+        self.colours.iter().filter(|colour| colour.is_some()).count()
+    }
+}
+
+/// What a search should ask for, given the spots the player wants and the slots
+/// they chose.
 ///
-/// Chosen samples take priority over the count - only they are asked for the
-/// colour, and every one of them must match.  Without a choice every sample is
-/// asked, and `slots` of them must match.  An index the table does not have is
-/// ignored rather than treated as a miss.
-pub fn plan(
-    len: usize,
-    want: Rgb,
-    slots: usize,
-    only: &[usize],
-) -> (Vec<Option<Rgb>>, usize) {
-    let chosen: Vec<usize> = only.iter().copied().filter(|index| *index < len).collect();
-    if !chosen.is_empty() {
+/// The spots number is the floor, and the chosen slots narrow where the hits may
+/// come from:
+///
+/// * no slots chosen - `spots` of the five samples must hold the colour;
+/// * fewer slots than spots - every chosen slot must hold it, and the rest of
+///   the spots may come from any of the other samples;
+/// * as many slots as spots - same thing, which leaves exactly the chosen slots
+///   to fill the requirement;
+/// * more slots than spots - only the chosen slots are asked, and any `spots` of
+///   them will do.
+///
+/// A chosen slot the table does not have is ignored rather than treated as a
+/// miss.
+pub fn plan(len: usize, want: Rgb, spots: usize, chosen: &[usize]) -> Need {
+    let picked: Vec<usize> = chosen
+        .iter()
+        .copied()
+        .filter(|index| *index < len)
+        .collect();
+    let spots = spots.clamp(1, len.max(1));
+
+    if picked.is_empty() {
+        return Need {
+            colours: vec![Some(want); len],
+            count: spots,
+            must: Vec::new(),
+        };
+    }
+
+    if picked.len() > spots {
         let mut colours = vec![None; len];
-        for index in &chosen {
+        for index in &picked {
             colours[*index] = Some(want);
         }
-        return (colours, chosen.len());
+        return Need {
+            colours,
+            count: spots,
+            must: Vec::new(),
+        };
     }
-    let need = slots.clamp(1, len.max(1));
-    (vec![Some(want); len], need)
+
+    Need {
+        colours: vec![Some(want); len],
+        count: spots,
+        must: picked,
+    }
+}
+
+/// Does the sample at `index` hold its colour at this position?
+///
+/// A sample the grid cannot answer for - the separator or the window background
+/// - cannot be guaranteed, so it counts as a miss here.
+fn holds(
+    grid: &Image,
+    offsets: &[(i32, i32)],
+    need: &Need,
+    tolerance: u8,
+    x: i32,
+    y: i32,
+    index: usize,
+) -> bool {
+    let Some(want) = need.colours.get(index).copied().flatten() else {
+        return false;
+    };
+    let Some(offset) = offsets.get(index) else {
+        return false;
+    };
+    match sample(grid, x + offset.0, y + offset.1) {
+        Some(px) => matches(px, want, tolerance),
+        None => false,
+    }
+}
+
+/// The best position a search found, and whether it meets the requirement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Best {
+    pub at: Match,
+    pub met: bool,
+}
+
+fn beats(candidate: &Match, best: &Option<Match>) -> bool {
+    match best {
+        None => true,
+        Some(b) => {
+            candidate.count > b.count
+                || (candidate.count == b.count && candidate.distance < b.distance)
+        }
+    }
+}
+
+/// Search for the best position, preferring one that satisfies `need`.
+///
+/// The returned position is the best that meets the requirement if there is
+/// one, otherwise the best that came closest, so a failed attempt can say what
+/// it found instead of only that it found nothing.
+pub fn search_need(
+    grid: &Image,
+    offsets: &[(i32, i32)],
+    need: &Need,
+    tolerance: u8,
+) -> Option<Best> {
+    let mut met: Option<Match> = None;
+    let mut any: Option<Match> = None;
+
+    for y in 0..SCAN_H as i32 {
+        for x in 0..SCAN_W as i32 {
+            let (count, distance) = evaluate(grid, offsets, &need.colours, tolerance, x, y);
+            let candidate = Match {
+                x,
+                y,
+                count,
+                distance,
+            };
+            let satisfies = count >= need.count
+                && need
+                    .must
+                    .iter()
+                    .all(|index| holds(grid, offsets, need, tolerance, x, y, *index));
+
+            if satisfies && beats(&candidate, &met) {
+                met = Some(candidate);
+            }
+            if beats(&candidate, &any) {
+                any = Some(candidate);
+            }
+        }
+    }
+
+    match met {
+        Some(at) => Some(Best { at, met: true }),
+        None => any.map(|at| Best { at, met: false }),
+    }
 }
 
 /// The preview picture the original draws: white, with red where the colour is.

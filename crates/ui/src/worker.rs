@@ -124,19 +124,11 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
             match cycle::scan_once(&window, &screen, &mouse, &opts) {
                 Ok(scan) => {
                     let mut summary = match scan.best {
-                        Some(best) if opts.slots_only.is_empty() => format!(
-                            "best ({},{}) - {}/{} samples hold #{}",
-                            best.x,
-                            best.y,
-                            best.count,
-                            scan.table.len(),
-                            hex(opts.colour)
-                        ),
                         Some(best) => format!(
                             "best ({},{}) - {} #{}",
                             best.x,
                             best.y,
-                            cycle::slot_phrase(&opts.slots_only),
+                            cycle::found_phrase(best.count, scan.asked, scan.asked < scan.table.len()),
                             hex(opts.colour)
                         ),
                         None => "no candidate".to_string(),
@@ -163,16 +155,13 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
                     y,
                     count,
                     samples,
+                    chosen_only,
                     clicked,
                     ..
                 } => format!(
                     "{} ({x},{y}) - {} #{}",
                     if clicked { "clicked" } else { "would click" },
-                    if opts.slots_only.is_empty() {
-                        format!("{count}/{samples} samples hold")
-                    } else {
-                        cycle::slot_phrase(&opts.slots_only)
-                    },
+                    cycle::found_phrase(count, samples, chosen_only),
                     hex(opts.colour)
                 ),
                 cycle::Outcome::Exhausted { cycles } => {

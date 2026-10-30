@@ -120,13 +120,10 @@ pub fn run(args: &[String]) -> i32 {
             y,
             count,
             samples,
+            chosen_only,
             clicked,
         } => {
-            let what = if opts.slots_only.is_empty() {
-                format!("{count}/{samples} samples hold")
-            } else {
-                cycle::slot_phrase(&opts.slots_only)
-            };
+            let what = cycle::found_phrase(count, samples, chosen_only);
             println!(
                 "{} ({x},{y}) after {cycles} cycle(s): {what} #{}",
                 if clicked { "clicked" } else { "would click" },
