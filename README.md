@@ -84,12 +84,11 @@ rolled again they disappear until the next Scan.
 | Colour square + hue strip | Pick the colour visually; the square follows the chosen colour. |
 | `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. |
 | `Dye spots` | How many of the five samples must hold the colour (1–5). Which samples fill that up is where `Slot` comes in. |
-| `Retries` | How many new rolls Auto may try, after the first, before giving up. |
+| `Retries` | How many new rolls Auto may try, after the first, before giving up. `0` keeps rolling until a match or Stop. |
 | `Variance ±` | Per-channel tolerance as a number, or drag the slider below it. `0` = exact match. |
 | `Find field` | Locate the palette and report where it is. |
 | `Scan` | Read the client's sample offsets, search, and draw the hit map. Nothing is clicked except Pick Color, and only if the picker is not already armed. |
 | `Auto` | Run the cycle until it clicks a match, or Stop. |
-| `Advanced` | Tab reserved for offsets, timings and per-slot colours. |
 
 The preview is the same view the original presents: white with red where the
 colour exists, blue squares for the client's legend, numbered points for the five

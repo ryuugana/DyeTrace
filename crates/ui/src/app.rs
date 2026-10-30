@@ -13,12 +13,6 @@ use dyetrace_engine::cycle::{Options, Scan};
 
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, TextureHandle, Vec2};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    Dye,
-    Advanced,
-}
-
 /// What a scan measured on one roll of the palette.
 struct Offsets {
     pointer: (i32, i32),
@@ -64,7 +58,6 @@ pub struct DyeTraceApp {
     worker: Worker,
     scan: Option<Scan>,
     status: String,
-    tab: Tab,
 }
 
 impl DyeTraceApp {
@@ -94,7 +87,6 @@ impl DyeTraceApp {
             preview,
             scan: None,
             status: "watching for the dye window".to_string(),
-            tab: Tab::Dye,
         };
         app.set_colour(Rgb::black());
         app
@@ -124,8 +116,11 @@ impl DyeTraceApp {
             variance: self.variance,
             slots: self.slots,
             slots_only: self.slots_only.clone(),
-            // One roll is the attempt; the rest are retries.
-            max_cycles: self.retries.saturating_add(1),
+            // One roll is the attempt, the rest are retries; 0 keeps going.
+            max_cycles: match self.retries {
+                0 => usize::MAX,
+                retries => retries.saturating_add(1),
+            },
             dry_run,
             stop: self.worker.stop_flag(),
             ..Options::default()
@@ -491,25 +486,15 @@ impl DyeTraceApp {
     /// The one line of feedback, along the bottom edge of the window.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
-        ui.label(RichText::new(&self.status).strong());
+        ui.horizontal(|ui| {
+            if self.worker.busy {
+                ui.spinner();
+            }
+            ui.label(RichText::new(&self.status).strong());
+        });
         ui.add_space(6.0);
     }
 
-    fn advanced(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(12.0);
-        ui.heading("Advanced");
-        ui.add_space(6.0);
-        ui.label(
-            "Reserved for the parts the reference build kept out of the way: button offsets, \
-             capture timing, a manual slot table and a log view.",
-        );
-        ui.add_space(12.0);
-        ui.label(RichText::new("Planned").strong());
-        ui.label("• Pick Color / Cancel offsets (currently 147 / 231 / 397)");
-        ui.label("• settle and retry timings");
-        ui.label("• per-slot colours instead of one colour for all five");
-        ui.label("• saved scan history and an export of the hit map");
-    }
 }
 
 impl eframe::App for DyeTraceApp {
@@ -520,47 +505,19 @@ impl eframe::App for DyeTraceApp {
         // what it found.
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
 
-        egui::TopBottomPanel::top("head").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("DyeTrace");
-                ui.add_space(12.0);
-                if ui
-                    .selectable_label(self.tab == Tab::Dye, "Dye")
-                    .clicked()
-                {
-                    self.tab = Tab::Dye;
-                }
-                if ui
-                    .selectable_label(self.tab == Tab::Advanced, "Advanced")
-                    .clicked()
-                {
-                    self.tab = Tab::Advanced;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.worker.busy {
-                        ui.spinner();
-                    }
-                });
-            });
-        });
-
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             self.status_bar(ui);
         });
 
-        if self.tab == Tab::Dye {
-            egui::SidePanel::left("controls")
-                .resizable(false)
-                .exact_width(310.0)
-                .show(ctx, |ui| {
-                    self.controls(ui);
-                });
-
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.vertical_centered(|ui| self.preview_panel(ui));
+        egui::SidePanel::left("controls")
+            .resizable(false)
+            .exact_width(310.0)
+            .show(ctx, |ui| {
+                self.controls(ui);
             });
-        } else {
-            egui::CentralPanel::default().show(ctx, |ui| self.advanced(ui));
-        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| self.preview_panel(ui));
+        });
     }
 }
