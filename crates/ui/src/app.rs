@@ -34,6 +34,75 @@ fn signature_key(signature: &[u8]) -> u64 {
     hash
 }
 
+/// A group's background: one step up from the window, with a hairline border, so
+/// the parts of the form read as groups rather than one long list.
+const CARD_FILL: Color32 = Color32::from_gray(27);
+const CARD_EDGE: Color32 = Color32::from_gray(48);
+/// How far a card's contents sit inside its edge.
+const CARD_MARGIN: i8 = 10;
+/// The colour square, and the gap it leaves before the column beside it.
+const PICKER_SIDE: f32 = 124.0;
+const COLUMN_GAP: f32 = 12.0;
+
+/// Run `add` inside a card, and hand back whatever it returned.
+fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::new()
+        .fill(CARD_FILL)
+        .stroke(Stroke::new(1.0_f32, CARD_EDGE))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(CARD_MARGIN, 9))
+        .show(ui, add)
+        .inner
+}
+
+/// A group's name: small, quiet and in capitals, so the eye lands on the values
+/// underneath instead of reading every label at the same weight.
+fn heading(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .size(10.5)
+            .strong()
+            .color(Color32::from_gray(152)),
+    );
+    ui.add_space(3.0);
+}
+
+/// The spacing, rounding and colours the whole window is drawn with.
+fn apply_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(10.0, 4.0);
+    style.spacing.interact_size.y = 22.0;
+    style.spacing.slider_width = 120.0;
+
+    style.visuals.panel_fill = Color32::from_gray(18);
+    style.visuals.window_fill = Color32::from_gray(20);
+    style.visuals.extreme_bg_color = Color32::from_gray(14);
+    style.visuals.faint_bg_color = Color32::from_gray(24);
+
+    for widget in [
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::same(5);
+    }
+    style.visuals.widgets.inactive.bg_fill = Color32::from_gray(38);
+    style.visuals.widgets.inactive.weak_bg_fill = Color32::from_gray(38);
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_gray(64));
+    style.visuals.widgets.hovered.bg_fill = Color32::from_gray(52);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_gray(52);
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_gray(92));
+    style.visuals.widgets.active.bg_fill = Color32::from_gray(60);
+    style.visuals.widgets.active.weak_bg_fill = Color32::from_gray(60);
+    style.visuals.selection.bg_fill = Color32::from_rgb(46, 104, 196);
+    style.visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_gray(230));
+
+    ctx.set_style(style);
+}
+
 pub struct DyeTraceApp {
     colour: Rgb,
     hex_text: String,
@@ -78,6 +147,7 @@ impl DyeTraceApp {
         // dark whatever the desktop theme is doing.
         cc.egui_ctx
             .options_mut(|options| options.theme_preference = egui::ThemePreference::Dark);
+        apply_style(&cc.egui_ctx);
 
         let saved = Config::load();
         let preview = Preview::spawn();
@@ -239,125 +309,170 @@ impl DyeTraceApp {
         self.hit_key = key;
     }
 
+    /// Colour selection, the RGB and hex boxes, and the picker with the match
+    /// settings beside it - each group in its own card.
     fn controls(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(4.0);
-        ui.label(RichText::new("Selected colour").strong());
-        let mut picked: Option<usize> = None;
-        ui.horizontal(|ui| {
-            let width = ui.available_width() - 86.0;
-            egui::ComboBox::from_id_salt("presets")
-                .width(width.max(120.0))
-                .selected_text(self.colour_name())
-                .show_ui(ui, |ui| {
-                    for (index, preset) in self.presets.items.iter().enumerate() {
-                        if ui
-                            .selectable_label(
-                                preset.colour == self.colour,
-                                format!("{:<12} #{}", preset.name, worker::hex(preset.colour)),
-                            )
-                            .clicked()
-                        {
-                            picked = Some(index);
-                        }
-                    }
-                });
-            if ui
-                .add_sized([78.0, 20.0], egui::Button::new("Save as…"))
-                .clicked()
-            {
-                let name = self.save_name.clone();
-                let colour = self.colour;
-                self.presets.save(&name, colour);
-                self.save_name.clear();
-            }
-        });
-        if let Some(index) = picked {
-            let colour = self.presets.items[index].colour;
-            self.set_colour(colour);
-        }
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                [64.0, 18.0],
-                egui::TextEdit::singleline(&mut self.save_name).hint_text("name"),
-            );
-            picker::swatch(ui, Vec2::new(42.0, 18.0), self.colour);
-            ui.label(RichText::new("saved into presets.txt").weak().small());
-        });
+        ui.add_space(2.0);
 
-        ui.add_space(10.0);
-        ui.label(RichText::new("RGB").strong());
-        ui.horizontal(|ui| {
-            let mut changed = false;
-            for (label, channel) in [
-                ("R", &mut self.colour.r),
-                ("G", &mut self.colour.g),
-                ("B", &mut self.colour.b),
-            ] {
-                ui.label(label);
+        card(ui, |ui| {
+            heading(ui, "Colour selection");
+            let mut picked: Option<usize> = None;
+            ui.horizontal(|ui| {
+                picker::swatch(ui, Vec2::new(22.0, 22.0), self.colour);
+                let width = ui.available_width() - 92.0;
+                egui::ComboBox::from_id_salt("presets")
+                    .width(width.max(110.0))
+                    .selected_text(self.colour_name())
+                    .show_ui(ui, |ui| {
+                        for (index, preset) in self.presets.items.iter().enumerate() {
+                            if ui
+                                .selectable_label(
+                                    preset.colour == self.colour,
+                                    format!("{:<12} #{}", preset.name, worker::hex(preset.colour)),
+                                )
+                                .clicked()
+                            {
+                                picked = Some(index);
+                            }
+                        }
+                    });
                 if ui
-                    .add_sized(
-                        [58.0, 20.0],
-                        egui::DragValue::new(channel).range(0..=255).speed(1.0),
-                    )
-                    .changed()
+                    .add_sized([76.0, 22.0], egui::Button::new("Save as..."))
+                    .clicked()
                 {
-                    changed = true;
+                    let name = self.save_name.clone();
+                    let colour = self.colour;
+                    self.presets.save(&name, colour);
+                    self.save_name.clear();
                 }
-            }
-            if changed {
-                let colour = self.colour;
+            });
+            if let Some(index) = picked {
+                let colour = self.presets.items[index].colour;
                 self.set_colour(colour);
             }
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [64.0, 20.0],
+                    egui::TextEdit::singleline(&mut self.save_name).hint_text("name"),
+                );
+                ui.label(RichText::new("saved into presets.txt").weak().small());
+            });
         });
 
-        ui.horizontal(|ui| {
-            ui.label("Hex");
-            let response = ui.add_sized(
-                [96.0, 20.0],
-                egui::TextEdit::singleline(&mut self.hex_text).char_limit(6),
-            );
-            if response.changed() {
-                let text = self.hex_text.trim().trim_start_matches('#').to_string();
-                if text.len() == 6 {
-                    if let Ok(value) = u32::from_str_radix(&text, 16) {
-                        self.set_colour(Rgb::from_u32(value));
-                        self.hex_text = text.to_uppercase();
+        ui.add_space(8.0);
+
+        card(ui, |ui| {
+            heading(ui, "RGB / hex values");
+            ui.horizontal(|ui| {
+                let mut changed = false;
+                for (label, channel) in [
+                    ("R", &mut self.colour.r),
+                    ("G", &mut self.colour.g),
+                    ("B", &mut self.colour.b),
+                ] {
+                    ui.label(RichText::new(label).color(Color32::from_gray(170)));
+                    if ui
+                        .add_sized(
+                            [56.0, 22.0],
+                            egui::DragValue::new(channel).range(0..=255).speed(1.0),
+                        )
+                        .changed()
+                    {
+                        changed = true;
                     }
                 }
-            }
-            ui.label(RichText::new("(web)").weak());
+                if changed {
+                    let colour = self.colour;
+                    self.set_colour(colour);
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Hex").color(Color32::from_gray(170)));
+                let response = ui.add_sized(
+                    [96.0, 22.0],
+                    egui::TextEdit::singleline(&mut self.hex_text).char_limit(6),
+                );
+                if response.changed() {
+                    let text = self.hex_text.trim().trim_start_matches('#').to_string();
+                    if text.len() == 6 {
+                        if let Ok(value) = u32::from_str_radix(&text, 16) {
+                            self.set_colour(Rgb::from_u32(value));
+                            self.hex_text = text.to_uppercase();
+                        }
+                    }
+                }
+                ui.label(RichText::new("(web)").weak());
+            });
         });
 
-        self.picker_panel(ui);
+        ui.add_space(8.0);
 
-        ui.add_space(14.0);
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    let mut changed = picker::saturation_value_square(
+                        ui,
+                        &mut self.textures,
+                        Vec2::splat(PICKER_SIDE),
+                        &mut self.hue,
+                        &mut self.saturation,
+                        &mut self.value,
+                    );
+                    ui.add_space(4.0);
+                    changed |= picker::hue_strip(
+                        ui,
+                        &mut self.textures,
+                        Vec2::new(PICKER_SIDE, 14.0),
+                        &mut self.hue,
+                    );
+                    if changed {
+                        self.colour_from_picker();
+                    }
+                });
+
+                ui.add_space(COLUMN_GAP);
+                ui.vertical(|ui| self.match_controls(ui));
+            });
+        });
+
+        ui.add_space(8.0);
+
+        card(ui, |ui| self.buttons(ui));
+    }
+
+    /// Start, About, and the key that ends a run.
+    fn buttons(&mut self, ui: &mut egui::Ui) {
         let busy = self.worker.busy;
-        let side = ui.available_width().min(120.0);
+        let mut start = false;
+        let mut about = false;
 
         ui.horizontal(|ui| {
             let row = ui.cursor().min.x;
 
-            let mut start = false;
-            let mut about = false;
             ui.add_enabled_ui(!busy, |ui| {
                 start = ui
-                    .add_sized([58.0, 26.0], egui::Button::new("Start"))
+                    .add_sized(
+                        [64.0, 28.0],
+                        egui::Button::new(RichText::new("Start").strong()),
+                    )
                     .clicked();
                 about = ui
-                    .add_sized([58.0, 26.0], egui::Button::new("About"))
+                    .add_sized([64.0, 28.0], egui::Button::new("About"))
                     .clicked();
             });
 
-            // The stop key sits in the same column as the numbers above it.
-            let want = row + side + 16.0;
+            // The stop key sits in the same column as the labels above it.
+            let want = row + PICKER_SIDE + COLUMN_GAP;
             let here = ui.cursor().min.x;
             if want > here {
                 ui.add_space(want - here);
             }
 
-            ui.label("Stop key");
+            ui.label(RichText::new("Stop key").color(Color32::from_gray(170)));
             if ui
-                .add_sized([40.0, 26.0], egui::Button::new("Set"))
+                .add_sized([40.0, 28.0], egui::Button::new("Set"))
                 .clicked()
             {
                 self.recording = true;
@@ -368,60 +483,28 @@ impl DyeTraceApp {
                 self.stop_on.name().to_string()
             };
             ui.label(RichText::new(shown).strong().size(15.0));
-
-            if start {
-                self.worker.submit(Job::Auto(self.options(false)));
-            }
-            if about {
-                self.about = true;
-            }
         });
+
+        if start {
+            self.worker.submit(Job::Auto(self.options(false)));
+        }
+        if about {
+            self.about = true;
+        }
     }
 
-    /// The colour picker, directly under the hex box, with the matching
-    /// controls beside it.
-    fn picker_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(10.0);
-        let side = ui.available_width().min(120.0);
-
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                let mut changed = picker::saturation_value_square(
-                    ui,
-                    &mut self.textures,
-                    Vec2::splat(side),
-                    &mut self.hue,
-                    &mut self.saturation,
-                    &mut self.value,
-                );
-                ui.add_space(4.0);
-                changed |= picker::hue_strip(
-                    ui,
-                    &mut self.textures,
-                    Vec2::new(side, 14.0),
-                    &mut self.hue,
-                );
-                if changed {
-                    self.colour_from_picker();
-                }
-            });
-
-            ui.add_space(10.0);
-            ui.vertical(|ui| self.match_controls(ui));
-        });
-    }
-
-    /// Slot selection, dye spots and variance, sitting beside the picker.
+    /// Slot selection, dye spots, retries and variance, in the column beside the
+    /// colour square.
     fn match_controls(&mut self, ui: &mut egui::Ui) {
-        ui.label("Slot");
+        heading(ui, "Presets");
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.spacing_mut().item_spacing.x = 4.0;
             let mut chosen = self.slots_only.clone();
             for n in 1..=5usize {
                 let slot = n - 1;
                 let selected = chosen.contains(&slot);
                 let button = egui::Button::new(format!("{n}")).selected(selected);
-                if ui.add_sized([22.0, 20.0], button).clicked() {
+                if ui.add_sized([26.0, 22.0], button).clicked() {
                     if selected {
                         chosen.retain(|picked| *picked != slot);
                     } else {
@@ -436,36 +519,37 @@ impl DyeTraceApp {
         ui.add_space(8.0);
         egui::Grid::new("match-controls")
             .num_columns(2)
-            .spacing([6.0, 4.0])
+            .spacing([10.0, 6.0])
             .show(ui, |ui| {
                 ui.label("Dye spots");
                 ui.add_sized(
-                    [46.0, 18.0],
+                    [46.0, 22.0],
                     egui::DragValue::new(&mut self.slots).range(1..=5).speed(0.1),
                 );
                 ui.end_row();
 
                 ui.label("Retries");
                 ui.add_sized(
-                    [46.0, 18.0],
+                    [46.0, 22.0],
                     egui::DragValue::new(&mut self.retries).range(0..=99).speed(0.1),
                 );
                 ui.end_row();
 
                 ui.label("Variance ±");
                 ui.add_sized(
-                    [46.0, 18.0],
+                    [46.0, 22.0],
                     egui::DragValue::new(&mut self.variance).range(0..=255).speed(1.0),
                 );
                 ui.end_row();
             });
 
-        ui.add_space(3.0);
-        ui.spacing_mut().slider_width = (ui.available_width() - 10.0).max(60.0);
+        ui.add_space(2.0);
+        ui.spacing_mut().slider_width = (ui.available_width() - 4.0).max(60.0);
         ui.add(egui::Slider::new(&mut self.variance, 0..=255).show_value(false));
     }
 
     fn preview_panel(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "Canvas preview");
         let snapshot = self.preview.latest();
         if let Some(snapshot) = &snapshot {
             self.ensure_hit_texture(ui.ctx(), &snapshot.grid, &snapshot.signature);
@@ -491,19 +575,19 @@ impl DyeTraceApp {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
 
         if snapshot.is_none() {
-            ui.painter().rect_filled(rect, 2.0, Color32::from_gray(28));
+            ui.painter().rect_filled(rect, 4.0, Color32::from_gray(24));
             ui.painter().rect_stroke(
                 rect,
-                2.0,
-                Stroke::new(1.0_f32, Color32::from_gray(70)),
+                4.0,
+                Stroke::new(1.0_f32, Color32::from_gray(60)),
                 egui::StrokeKind::Inside,
             );
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "waiting for the dye window",
-                egui::FontId::proportional(13.0),
-                Color32::from_gray(140),
+                egui::FontId::proportional(12.0),
+                Color32::from_gray(130),
             );
             return;
         }
@@ -630,14 +714,21 @@ impl DyeTraceApp {
 
     /// The one line of feedback, along the bottom edge of the window.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if self.worker.busy {
+            let busy = self.worker.busy;
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+            let colour = if busy {
+                Color32::from_rgb(224, 176, 66)
+            } else {
+                Color32::from_rgb(104, 178, 118)
+            };
+            ui.painter().circle_filled(rect.center(), 4.0, colour);
+            if busy {
                 ui.spinner();
             }
+            ui.label(RichText::new("Status:").color(Color32::from_gray(140)));
             ui.label(RichText::new(&self.status).strong());
         });
-        ui.add_space(6.0);
     }
 }
 
@@ -653,20 +744,40 @@ impl eframe::App for DyeTraceApp {
         // what it found.
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
 
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            self.status_bar(ui);
-        });
+        egui::TopBottomPanel::bottom("status")
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(14))
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(ctx, |ui| {
+                self.status_bar(ui);
+            });
 
         egui::SidePanel::left("controls")
             .resizable(false)
-            .exact_width(310.0)
+            .exact_width(340.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(18))
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
             .show(ctx, |ui| {
                 self.controls(ui);
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| self.preview_panel(ui));
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(18))
+                    .inner_margin(egui::Margin::symmetric(8, 6)),
+            )
+            .show(ctx, |ui| {
+                card(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    self.preview_panel(ui);
+                });
+            });
 
         self.about_window(ctx);
         self.remember();

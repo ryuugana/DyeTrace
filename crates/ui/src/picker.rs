@@ -138,7 +138,11 @@ pub fn hue_strip(
 pub fn swatch(ui: &mut Ui, size: Vec2, colour: Rgb) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter()
-        .rect_filled(rect, 2.0, Color32::from_rgb(colour.r, colour.g, colour.b));
-    ui.painter()
-        .rect_stroke(rect, 2.0, Stroke::new(1.0_f32, Color32::from_gray(90)), egui::StrokeKind::Inside);
+        .rect_filled(rect, 4.0, Color32::from_rgb(colour.r, colour.g, colour.b));
+    ui.painter().rect_stroke(
+        rect,
+        4.0,
+        Stroke::new(1.0_f32, Color32::from_gray(110)),
+        egui::StrokeKind::Inside,
+    );
 }
