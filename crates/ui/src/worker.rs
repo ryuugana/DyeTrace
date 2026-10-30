@@ -75,17 +75,11 @@ impl Worker {
     }
 }
 
-#[cfg(not(windows))]
-fn run_job(_job: Job, _capture: &Capture, messages: &Sender<Msg>, _stop: &Arc<AtomicBool>) {
-    let _ = messages.send(Msg::Finished);
-}
-
-#[cfg(windows)]
 fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
-    use dyetrace_platform_win::{WinMouse, WinWindow};
+    use dyetrace_platform_native::{NativeMouse, NativeWindow};
 
-    let window = WinWindow::mabinogi();
-    let mouse = WinMouse::new();
+    let window = NativeWindow::mabinogi();
+    let mouse = NativeMouse::new();
 
     let send = |msg: Msg| {
         let _ = messages.send(msg);
@@ -138,7 +132,6 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
     send(Msg::Finished);
 }
 
-#[cfg(windows)]
 fn fail_text(err: cycle::ScanFail) -> String {
     match err {
         cycle::ScanFail::NoClient => "No client window found".to_string(),

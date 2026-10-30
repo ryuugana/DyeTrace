@@ -1,16 +1,17 @@
 //! Watching for the stop key.
 //!
 //! While a cycle runs the client is in the foreground, so this window never sees
-//! the keystroke.  The key is polled with `GetAsyncKeyState` instead, which
-//! answers wherever the keystroke is going, and the poller raises the worker's
-//! stop flag when it goes down.
+//! the keystroke.  The key is polled through the platform's global key state
+//! instead (`GetAsyncKeyState` on Windows, `QueryKeymap` on X11), which answers
+//! wherever the keystroke is going, and the poller raises the worker's stop flag
+//! when it goes down.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use dyetrace_platform_win::key_down;
+use dyetrace_platform_native::KeyWatcher;
 use eframe::egui;
 
 /// How often the key is looked at.
@@ -28,19 +29,20 @@ impl StopKey {
     pub fn watch(stop: Arc<AtomicBool>) -> Self {
         let key = Arc::new(Mutex::new(DEFAULT_KEY));
         let watched = Arc::clone(&key);
+        let keys = KeyWatcher::new();
 
         thread::spawn(move || loop {
             thread::sleep(POLL);
 
             let current = watched.lock().map(|slot| *slot).unwrap_or(0);
-            if current == 0 || !key_down(current) {
+            if current == 0 || !keys.is_down(current) {
                 continue;
             }
 
             stop.store(true, Ordering::SeqCst);
             // A held key must not stop the next cycle as well, so wait for it to
             // come back up before looking again.
-            while key_down(current) {
+            while keys.is_down(current) {
                 thread::sleep(POLL);
             }
         });
@@ -48,7 +50,7 @@ impl StopKey {
         Self { key }
     }
 
-    /// Change the key, by virtual-key code.
+    /// Change the key, by key id.
     pub fn set(&self, vk: i32) {
         if let Ok(mut slot) = self.key.lock() {
             *slot = vk;
@@ -56,12 +58,13 @@ impl StopKey {
     }
 }
 
-/// Every key the window can offer as a stop key, with its Windows virtual-key
-/// code.
+/// Every key the window can offer as a stop key, with its key id.
 ///
-/// Only keys with a stable code are listed - letters, digits, the named editing
-/// keys and the function keys - so a recorded key and the polled one are always
-/// the same thing.
+/// The id is the Win32 virtual-key number, which the config file has always
+/// stored; the X11 backend maps it to the matching keysym.  Only keys with a
+/// stable id are listed - letters, digits, the named editing keys and the
+/// function keys - so a recorded key and the polled one are always the same
+/// thing.
 const KEY_CODES: &[(egui::Key, i32)] = &[
     (egui::Key::A, 0x41),
     (egui::Key::B, 0x42),
@@ -140,7 +143,7 @@ const KEY_CODES: &[(egui::Key, i32)] = &[
     (egui::Key::Backtick, 0xC0),
 ];
 
-/// The virtual-key code of a key the window can name.
+/// The key id of a key the window can name.
 pub fn virtual_key(key: egui::Key) -> Option<i32> {
     KEY_CODES
         .iter()

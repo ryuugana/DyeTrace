@@ -1,21 +1,15 @@
-//! `--snapshot-window`: capture the client window with `PrintWindow`.
+//! `--snapshot-window`: capture the client window without raising it.
 //!
-//! Used to check whether the client can be read without raising it, which is
-//! what keeps the interface usable while a scan runs.
+//! Uses a whole-window capture (`PrintWindow` on Windows, `GetImage` on the
+//! client's drawable on X11), which is what keeps the interface usable while a
+//! scan runs.
 
 use std::path::Path;
 
-#[cfg(not(windows))]
-pub fn run(_args: &[String]) -> i32 {
-    eprintln!("--snapshot-window needs the Windows backend");
-    2
-}
-
-#[cfg(windows)]
 pub fn run(args: &[String]) -> i32 {
     use dyetrace_platform::bmp;
-    use dyetrace_platform::traits::GameWindow;
-    use dyetrace_platform_win::{WinScreen, WinWindow};
+    use dyetrace_platform::traits::{GameWindow, Screen};
+    use dyetrace_platform_native::{NativeScreen, NativeWindow};
 
     let path = match args.first() {
         Some(p) => Path::new(p),
@@ -25,15 +19,15 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
-    let window = WinWindow::mabinogi();
+    let window = NativeWindow::mabinogi();
     let Some(id) = window.find() else {
         eprintln!("no client window found");
         return 1;
     };
 
-    let screen = WinScreen::new();
-    let Some(image) = screen.capture_window(id.0 as isize) else {
-        eprintln!("PrintWindow failed");
+    let screen = NativeScreen::new();
+    let Some(image) = Screen::capture_window(&screen, id) else {
+        eprintln!("whole-window capture failed");
         return 1;
     };
 

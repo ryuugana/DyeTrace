@@ -1,0 +1,14 @@
+[package]
+name = "dyetrace-platform-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The platform backend for the operating system this build targets"
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+dyetrace-platform-win = { path = "../platform-win" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dyetrace-platform-linux = { path = "../platform-linux" }

@@ -32,7 +32,8 @@ pub struct Config {
     pub variance: u8,
     /// Chosen samples, 0-based as the dye window numbers them.
     pub slots: Vec<usize>,
-    /// Virtual-key code of the stop key.
+    /// Key id of the stop key (the Win32 virtual-key number; the X11
+    /// backend maps it to a keysym).
     pub stop_key: i32,
 }
 

@@ -2,7 +2,7 @@
 
 **An open-source dye palette finder for Mabinogi** — pick the colour you want, and it finds the spot in the dye gradient that produces it, then clicks it for you.
 
-Windows · Rust · single executable · no runtime dependencies
+Windows & Linux · Rust · single executable · no runtime dependencies
 
 ![DyeTrace scanning a dye palette](docs/captures/ui.png)
 
@@ -29,27 +29,45 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - `crates/core` - platform-free matching: palette detection, legend offsets, the search, and the twelve behaviour checks as tests
 - `crates/platform` - the `Screen` / `Mouse` / `GameWindow` traits, plus BMP replay fakes so the pipeline runs without a client
 - `crates/platform-win` - the Win32 backend (`BitBlt`, verified pointer moves, window focus)
+- `crates/platform-linux` - the X11 backend (`GetImage`, XTEST pointer input, `QueryKeymap`), spoken directly over the X protocol with no C headers
+- `crates/platform-native` - picks the backend for the target, so the CLI and the window contain no platform branches
 - `crates/app` - the CLI: `--selftest`, `--replay`, `--probe`, `--snapshot`, `--auto`
 - `crates/engine` - the dye cycle itself, shared by the CLI and the window
 - `crates/ui` - the windowed interface (egui): colour picker, presets, hit map
 
 ## Requirements
 
-- Windows 10 or later.
+- Windows 10 or later, **or** Linux with an X11 display.
+- On Wayland, the game must run through **XWayland** (GNOME and KDE start it automatically). DyeTrace talks the X11 protocol for capture and input, so a game running natively on Wayland is not reachable.
 - Mabinogi running in a **window** (not exclusive fullscreen), with the dye window open and the palette visible.
 - The client must be the foreground window: DyeTrace reads the palette from the screen.
 
+The Linux backend speaks X11 directly through a pure-Rust client, so no libX11 development package is needed to build or run it.
+
 ## Build
 
-```bat
-cargo build --release     :: target\release\dyetrace.exe     (CLI)
-                          :: target\release\dyetrace-ui.exe  (window)
-cargo test                :: behaviour checks + offset/search/backend tests
+```sh
+cargo build --release
+#   target/release/dyetrace     - CLI
+#   target/release/dyetrace-ui  - window
+
+cargo test
+#   behaviour checks + offset/search/backend tests
 ```
+
+On Windows the executables end in `.exe`. The release binary is self-contained on both platforms.
+
+## Linux notes
+
+- The window runs under Wayland or X11 like any egui application, but the game is read and clicked through X11: under a Wayland session that means XWayland, which is where the game runs too.
+- Whole-window capture reads the client's own drawable, so the palette can be read while another window covers it on a composited desktop.
+- Rootless XWayland does not let a client read the root window. `--snapshot` then assembles the rectangle from the visible top-level windows, which is enough for layout and palette diagnosis. `--probe`, `--auto` and the window preview read the client window directly and are unaffected.
+- The stop key is polled with `QueryKeymap`, so it works while the game has the keyboard focus, just as `GetAsyncKeyState` does on Windows.
+- The Python helpers in `tools/` are Windows-only diagnostics (they use `ctypes.WinDLL`); the Rust CLI covers the same ground.
 
 ## Usage
 
-`dyetrace-ui.exe` is the window: the controls and the colour picker on the
+`dyetrace-ui` (`dyetrace-ui.exe` on Windows) is the window: the controls and the colour picker on the
 left, the search preview on the right, and one line of feedback along the
 bottom.
 
@@ -137,17 +155,17 @@ The window is driven with:
 
 ## Command line
 
-The command line (`target\release\dyetrace.exe`):
+The command line (`target/release/dyetrace`, or `dyetrace.exe` on Windows):
 
-```bat
-dyetrace --selftest                      :: the twelve behaviour checks -> selftest.txt
-dyetrace --auto --colour 000000 --slots 3 :: run the dye cycle on the live client
-dyetrace --auto --colour 000000 --slot 2  :: same, but require sample 2 to hold it
-dyetrace --auto --colour 000000 --slot 1,3,5 :: require samples 1, 3 and 5
-dyetrace --auto --dry-run                 :: same, but never click the gradient
-dyetrace --probe --out DIR                :: locate the palette, write window/palette BMPs
-dyetrace --replay <clean.bmp> [<hover.bmp>] :: run the pipeline against saved frames
-dyetrace --snapshot <out.bmp>             :: capture the primary screen
+```sh
+dyetrace --selftest                         # the twelve behaviour checks -> selftest.txt
+dyetrace --auto --colour 000000 --slots 3   # run the dye cycle on the live client
+dyetrace --auto --colour 000000 --slot 2    # same, but require sample 2 to hold it
+dyetrace --auto --colour 000000 --slot 1,3,5 # require samples 1, 3 and 5
+dyetrace --auto --dry-run                   # same, but never click the gradient
+dyetrace --probe --out DIR                  # locate the palette, write window/palette BMPs
+dyetrace --replay <clean.bmp> [<hover.bmp>] # run the pipeline against saved frames
+dyetrace --snapshot <out.bmp>               # capture the primary screen
 ```
 
 ## Troubleshooting
@@ -158,12 +176,15 @@ dyetrace --snapshot <out.bmp>             :: capture the primary screen
 | `move this window off the palette - it is covering the colours` | DyeTrace is overlapping the gradient; move it aside. |
 | Auto keeps cancelling | The button offsets built into the engine are not hitting Pick Color / Cancel on your layout. Check them with a screenshot. |
 | The dye window closed itself | A Cancel click landed while the button still read Pick Color. Current builds read the label first and only press Cancel when it reads Start Dyeing; if you see this, run the same job from the command line, which prints the lines beginning `button reads`. |
-| Nothing gets clicked | The client ignores `SetCursorPos` for its hover state; DyeTrace also injects real mouse movement. If the cursor cannot be placed, the status says `auto: cursor did not reach the match - cycle aborted` and the cycle stops rather than clicking blind. |
+| Nothing gets clicked | The client ignores a bare cursor move (`SetCursorPos` on Windows, `WarpPointer` on X11) for its hover state; DyeTrace also injects real mouse movement. If the cursor cannot be placed, the status says `auto: cursor did not reach the match - cycle aborted` and the cycle stops rather than clicking blind. |
 | Wrong spot gets picked | Loosen or tighten `variance`, or change `slots`. Compare against the red hit map — it shows exactly what the search sees. |
+| Linux: `client window not found` | The game is not running under XWayland, or its window has neither a `Mabinogi` class nor title. Start the game through XWayland, or use `--probe` to see what is found. |
+| Linux: `--snapshot` has black areas | Rootless XWayland cannot read the root window, so DyeTrace assembles the picture from the visible X11 windows; the Wayland desktop and Wayland-native applications are not in it. `--probe`, `--auto` and the preview read the game window directly. |
 
 ## Limitations
 
-- Windows only, and it reads the screen: the palette must be visible and unobstructed.
+- Windows and Linux/X11 only (Linux under Wayland needs XWayland); it reads the screen, so the palette must be visible unless the desktop keeps window contents available when covered.
+- The Linux backend drives the X11 pointer, not a native Wayland one, so a game running natively on Wayland is out of reach.
 - One colour per run. DyeLite allows a different colour per slot; DyeTrace matches a single colour against N of the five samples.
 - No profiles: one set of settings, kept in `config.txt`, and one list of named colours in `presets.txt`.
 - Only tested against the current English client; the button offsets live in `Options` if a layout differs.

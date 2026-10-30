@@ -1,7 +1,7 @@
 //! Pixel buffer and colour type shared by every stage.
 //!
-//! Pixels are stored as `0x00RRGGBB`, the layout the DIB section in the C
-//! version holds, so captures can be handed over without conversion.
+//! Pixels are stored as `0x00RRGGBB`, one `u32` per pixel, so a capture from
+//! any backend can be handed over without conversion.
 
 /// A colour, or a pixel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

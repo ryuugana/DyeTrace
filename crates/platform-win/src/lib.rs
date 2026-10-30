@@ -6,6 +6,7 @@
 //!   read-back so a click is never sent to the wrong place
 //! * [`WinWindow`] - `FindWindowA`, `GetWindowRect`, and foregrounding with the
 //!   SPI lock-timeout trick the client needs
+//! * [`KeyWatcher`] - `GetAsyncKeyState`, which answers wherever the focus is
 
 mod ffi;
 mod mouse;
@@ -26,4 +27,22 @@ pub fn key_down(vk: i32) -> bool {
     // SAFETY: GetAsyncKeyState takes the key code by value and reads no memory
     // of ours; the high bit of the result is "down".
     unsafe { ffi::GetAsyncKeyState(vk) as u16 & 0x8000 != 0 }
+}
+
+/// Watches a key by virtual-key code.
+///
+/// The same shape as the X11 backend's watcher, so the window does not need to
+/// know which platform it was built for.  There is no connection to hold on
+/// Win32: each call asks the system directly.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct KeyWatcher;
+
+impl KeyWatcher {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn is_down(&self, key: i32) -> bool {
+        key_down(key)
+    }
 }

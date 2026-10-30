@@ -1,6 +1,8 @@
 //! Smoke tests for the Win32 backend: every call the traits need, without
 //! touching the client.
 
+#![cfg(windows)]
+
 use dyetrace_platform::traits::{GameWindow, Mouse, Screen};
 use dyetrace_platform_win::{WinMouse, WinScreen, WinWindow};
 

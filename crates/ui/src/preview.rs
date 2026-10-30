@@ -20,7 +20,7 @@ use dyetrace_core::label::{self, Label};
 use dyetrace_core::{markers, palette, CAP_H, CAP_W, MAX_TARGETS};
 use dyetrace_engine::cycle::MIN_GRADIENT;
 use dyetrace_platform::traits::{GameWindow, Screen, WindowId};
-use dyetrace_platform_win::{WinScreen, WinWindow};
+use dyetrace_platform_native::{NativeScreen, NativeWindow};
 
 /// How often the idle palette is captured.
 const TICK: Duration = Duration::from_millis(100);
@@ -69,7 +69,7 @@ impl Preview {
     /// The capture path the engine should use, so its frames reach the view.
     pub fn capture(&self) -> Capture {
         Capture {
-            screen: WinScreen::new(),
+            screen: NativeScreen::new(),
 
             shared: Arc::clone(&self.shared),
             origin: Mutex::new(None),
@@ -92,8 +92,8 @@ impl Drop for Preview {
 }
 
 fn tick(shared: Arc<Shared>, stop: Arc<AtomicBool>) {
-    let screen = WinScreen::new();
-    let window = WinWindow::mabinogi();
+    let screen = NativeScreen::new();
+    let window = NativeWindow::mabinogi();
 
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(TICK);
@@ -190,7 +190,7 @@ fn snapshot(origin: (i32, i32), frame: &Image) -> Option<Snapshot> {
 /// The screen the rest of the program captures through: every frame it returns
 /// is also offered to the view.
 pub struct Capture {
-    screen: WinScreen,
+    screen: NativeScreen,
 
     shared: Arc<Shared>,
     origin: Mutex<Option<(i32, i32)>>,

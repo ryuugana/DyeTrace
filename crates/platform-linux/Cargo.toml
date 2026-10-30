@@ -1,0 +1,15 @@
+[package]
+name = "dyetrace-platform-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "X11 backend for DyeTrace (screen capture, pointer, client window)"
+
+# Only built on Linux; the crate itself is empty elsewhere, so make sure the X11
+# client is not pulled into a Windows build of the workspace.
+[target.'cfg(target_os = "linux")'.dependencies]
+dyetrace-core = { path = "../core" }
+dyetrace-platform = { path = "../platform" }
+# The X protocol, spoken directly by a pure-Rust client: no libX11 headers or
+# unversioned .so symlinks are needed to build or run.
+x11rb = { version = "0.13", features = ["xtest"] }
