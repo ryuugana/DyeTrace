@@ -94,7 +94,7 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
     match job {
         Job::Auto(mut opts) => {
             opts.stop = Some(Arc::clone(stop));
-            send(Msg::Status("starting".to_string()));
+            send(Msg::Status("Starting".to_string()));
 
             // Measure the offsets first, and show them: the run arms the picker
             // anyway, so this costs one pass and the window can mark the samples
@@ -116,20 +116,20 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
                     ..
                 } => format!(
                     "{} ({x},{y}) - {} #{}",
-                    if clicked { "clicked" } else { "would click" },
+                    if clicked { "Clicked" } else { "Would click" },
                     cycle::found_phrase(count, samples, chosen_only),
                     hex(opts.colour)
                 ),
                 cycle::Outcome::Exhausted { cycles } => {
                     if stop.load(Ordering::Relaxed) {
-                        format!("stopped after {cycles} cycle(s)")
+                        format!("Stopped after {cycles} cycle(s)")
                     } else {
-                        format!("no match after {cycles} cycle(s)")
+                        format!("No match after {cycles} cycle(s)")
                     }
                 }
-                cycle::Outcome::NoClient => "client or gradient not found".to_string(),
+                cycle::Outcome::NoClient => "Client or gradient not found".to_string(),
                 cycle::Outcome::PointerLost { cycles } => {
-                    format!("pointer could not be placed in cycle {cycles}")
+                    format!("Pointer could not be placed in cycle {cycles}")
                 }
             }));
         }
@@ -141,11 +141,15 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
 #[cfg(windows)]
 fn fail_text(err: cycle::ScanFail) -> String {
     match err {
-        cycle::ScanFail::NoClient => "no client window found".to_string(),
-        cycle::ScanFail::NoGradient => "no palette - is the dye window open?".to_string(),
-        cycle::ScanFail::Pointer => "the pointer could not be placed".to_string(),
-        cycle::ScanFail::NoLegend => "the client never drew its sample squares - reopen the dye window".to_string(),
-        cycle::ScanFail::ButtonUnknown => "cannot read the dye button - leaving it alone".to_string(),
+        cycle::ScanFail::NoClient => "No client window found".to_string(),
+        cycle::ScanFail::NoGradient => "No palette - is the dye window open?".to_string(),
+        cycle::ScanFail::Pointer => "The pointer could not be placed".to_string(),
+        cycle::ScanFail::NoLegend => {
+            "The client never drew its sample squares - reopen the dye window".to_string()
+        }
+        cycle::ScanFail::ButtonUnknown => {
+            "Cannot read the dye button - leaving it alone".to_string()
+        }
     }
 }
 

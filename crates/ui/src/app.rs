@@ -43,16 +43,38 @@ const CARD_MARGIN: i8 = 10;
 /// The colour square, and the gap it leaves before the column beside it.
 const PICKER_SIDE: f32 = 124.0;
 const COLUMN_GAP: f32 = 12.0;
+/// The air between one card and the next.
+const CARD_GAP: f32 = 8.0;
+/// The line a card's heading takes, so a box can be measured around it.
+const HEADING_ROOM: f32 = 26.0;
 
 /// Run `add` inside a card, and hand back whatever it returned.
+///
+/// Every card is as wide as the column it sits in, whatever is inside it, so the
+/// stack reads as one block with even edges.
 fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    card_frame(ui, add).inner
+}
+
+/// The same, keeping the frame's response so a caller can use the rectangle it
+/// came out at.
+fn card_frame<R>(
+    ui: &mut egui::Ui,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
     egui::Frame::new()
         .fill(CARD_FILL)
         .stroke(Stroke::new(1.0_f32, CARD_EDGE))
         .corner_radius(6.0)
         .inner_margin(egui::Margin::symmetric(CARD_MARGIN, 9))
-        .show(ui, add)
-        .inner
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            // The stack outside the cards has no spacing of its own, so the gaps
+            // between cards are the gaps that are asked for; rows inside a card
+            // get it back.
+            ui.spacing_mut().item_spacing.y = 6.0;
+            add(ui)
+        })
 }
 
 /// A group's name: small, quiet and in capitals, so the eye lands on the values
@@ -139,6 +161,9 @@ pub struct DyeTraceApp {
 
     scan: Option<Scan>,
     status: String,
+    /// How tall the preview box came out last frame, so it can be centred on its
+    /// real height instead of an estimate of it.
+    preview_box: f32,
 }
 
 impl DyeTraceApp {
@@ -178,7 +203,8 @@ impl DyeTraceApp {
             about: false,
             saved,
             scan: None,
-            status: "watching for the dye window".to_string(),
+            status: "Watching for the dye window".to_string(),
+            preview_box: 0.0,
         };
 
         app.set_colour(app.colour);
@@ -312,7 +338,10 @@ impl DyeTraceApp {
     /// Colour selection, the RGB and hex boxes, and the picker with the match
     /// settings beside it - each group in its own card.
     fn controls(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(2.0);
+        // The stack has no spacing of its own, so the gaps between cards are
+        // exactly the gaps asked for - equal, whatever the cards contain.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.add_space(CARD_GAP);
 
         card(ui, |ui| {
             heading(ui, "Colour selection");
@@ -360,7 +389,7 @@ impl DyeTraceApp {
             });
         });
 
-        ui.add_space(8.0);
+        ui.add_space(CARD_GAP);
 
         card(ui, |ui| {
             heading(ui, "RGB / hex values");
@@ -407,7 +436,7 @@ impl DyeTraceApp {
             });
         });
 
-        ui.add_space(8.0);
+        ui.add_space(CARD_GAP);
 
         card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -437,7 +466,7 @@ impl DyeTraceApp {
             });
         });
 
-        ui.add_space(8.0);
+        ui.add_space(CARD_GAP);
 
         card(ui, |ui| self.buttons(ui));
     }
@@ -548,7 +577,7 @@ impl DyeTraceApp {
         ui.add(egui::Slider::new(&mut self.variance, 0..=255).show_value(false));
     }
 
-    fn preview_panel(&mut self, ui: &mut egui::Ui) {
+    fn preview_panel(&mut self, ui: &mut egui::Ui, side: f32) {
         heading(ui, "Canvas preview");
         let snapshot = self.preview.latest();
         if let Some(snapshot) = &snapshot {
@@ -568,10 +597,7 @@ impl DyeTraceApp {
             _ => None,
         };
 
-        let available = ui.available_size();
-        let side = available.x.min(available.y).clamp(160.0, 460.0);
-        // The same air above the picture as below it, down to the status bar.
-        ui.add_space(((available.y - side) * 0.5).max(0.0));
+        let side = side.min(ui.available_width());
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
 
         if snapshot.is_none() {
@@ -585,7 +611,7 @@ impl DyeTraceApp {
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "waiting for the dye window",
+                "Waiting for the dye window",
                 egui::FontId::proportional(12.0),
                 Color32::from_gray(130),
             );
@@ -773,10 +799,25 @@ impl eframe::App for DyeTraceApp {
                     .inner_margin(egui::Margin::symmetric(8, 6)),
             )
             .show(ctx, |ui| {
-                card(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    self.preview_panel(ui);
-                });
+                // The canvas is square, so the card is only as tall as the
+                // picture plus its heading: the picture fills the box instead of
+                // floating in a tall empty one.  The box is then centred on the
+                // height it actually took, measured last frame.
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let space = ui.available_size();
+                let side = (space.x.min(space.y - HEADING_ROOM)
+                    - 2.0 * CARD_MARGIN as f32
+                    - 2.0)
+                    .clamp(160.0, 640.0);
+                let estimate = if self.preview_box > 0.0 {
+                    self.preview_box
+                } else {
+                    side + HEADING_ROOM + 2.0 * 9.0 + 2.0
+                };
+                ui.add_space(((space.y - estimate) * 0.5).max(0.0));
+
+                let drawn = card_frame(ui, |ui| self.preview_panel(ui, side));
+                self.preview_box = drawn.response.rect.height();
             });
 
         self.about_window(ctx);
