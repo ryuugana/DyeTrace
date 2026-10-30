@@ -124,14 +124,23 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
             match cycle::scan_once(&window, &screen, &mouse, &opts) {
                 Ok(scan) => {
                     let mut summary = match scan.best {
-                        Some(best) => format!(
-                            "best ({},{}) - {}/{} samples hold #{}",
-                            best.x,
-                            best.y,
-                            best.count,
-                            scan.table.len(),
-                            hex(opts.colour)
-                        ),
+                        Some(best) => match opts.prefer {
+                            Some(index) => format!(
+                                "best ({},{}) - slot {} holds #{}",
+                                best.x,
+                                best.y,
+                                index + 1,
+                                hex(opts.colour)
+                            ),
+                            None => format!(
+                                "best ({},{}) - {}/{} samples hold #{}",
+                                best.x,
+                                best.y,
+                                best.count,
+                                scan.table.len(),
+                                hex(opts.colour)
+                            ),
+                        },
                         None => "no candidate".to_string(),
                     };
                     if scan.armed {
@@ -159,8 +168,12 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
                     clicked,
                     ..
                 } => format!(
-                    "{} ({x},{y}) - {count}/{samples} samples hold #{}",
+                    "{} ({x},{y}) - {} #{}",
                     if clicked { "clicked" } else { "would click" },
+                    match opts.prefer {
+                        Some(index) => format!("slot {} holds", index + 1),
+                        None => format!("{count}/{samples} samples hold"),
+                    },
                     hex(opts.colour)
                 ),
                 cycle::Outcome::Exhausted { cycles } => {

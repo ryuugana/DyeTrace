@@ -48,8 +48,8 @@ fn usage() {
     println!("  dyetrace --auto [options]          run the dye cycle on the live client\n");
     println!("Auto options:");
     println!("  --colour RRGGBB   colour to look for     --variance N   tolerance");
-    println!("  --slots N         samples required (1-5) --cycles N     attempts");
-    println!("  --dry-run         search but do not click the gradient\n");
+    println!("  --slots N         samples required (1-5) --slot N       require sample N");
+    println!("  --cycles N        attempts               --dry-run      search, never click\n");
     println!("Replay options:");
     println!("  --pointer X,Y      pointer position in the frame (default: centre)");
     println!("  --colour RRGGBB    search for this colour");

@@ -26,6 +26,8 @@ pub struct DyeTraceApp {
 
     slots: usize,
     variance: u8,
+    /// Which of the five samples must hold the colour; `None` uses `slots`.
+    prefer: Option<usize>,
 
     presets: Presets,
     save_name: String,
@@ -42,7 +44,12 @@ pub struct DyeTraceApp {
 }
 
 impl DyeTraceApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // The preview is a dark backdrop with white/red hits, so the window is
+        // dark whatever the desktop theme is doing.
+        cc.egui_ctx
+            .options_mut(|options| options.theme_preference = egui::ThemePreference::Dark);
+
         let mut app = Self {
             colour: Rgb::black(),
             hex_text: "000000".to_string(),
@@ -51,6 +58,7 @@ impl DyeTraceApp {
             value: 0.0,
             slots: 1,
             variance: 0,
+            prefer: None,
             presets: Presets::load(),
             save_name: String::new(),
             textures: PickerTextures::default(),
@@ -89,6 +97,7 @@ impl DyeTraceApp {
             colour: self.colour,
             variance: self.variance,
             slots: self.slots,
+            prefer: self.prefer,
             dry_run,
             stop: self.worker.stop_flag(),
             ..Options::default()
@@ -236,18 +245,6 @@ impl DyeTraceApp {
 
         self.picker_panel(ui);
 
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            ui.label("Dye spots");
-            ui.add(egui::DragValue::new(&mut self.slots).range(1..=5).speed(0.1));
-            ui.label(RichText::new("how many of the five samples").weak().small());
-        });
-        ui.horizontal(|ui| {
-            ui.label("Variance ±");
-            ui.add(egui::DragValue::new(&mut self.variance).range(0..=255).speed(1.0));
-            ui.label(RichText::new("per channel").weak().small());
-        });
-
         ui.add_space(14.0);
         let busy = self.worker.busy;
         ui.horizontal(|ui| {
@@ -273,37 +270,73 @@ impl DyeTraceApp {
         ui.label(RichText::new(&self.status).strong());
     }
 
-    /// The colour picker, directly under the hex box: the square and its hue
-    /// strip, with the chosen colour shown beside the label.
+    /// The colour picker, directly under the hex box, with the matching
+    /// controls beside it.
     fn picker_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(10.0);
+        let side = ui.available_width().min(120.0);
+
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Colour").strong());
-            picker::swatch(ui, Vec2::new(42.0, 18.0), self.colour);
+            ui.vertical(|ui| {
+                let mut changed = picker::saturation_value_square(
+                    ui,
+                    &mut self.textures,
+                    Vec2::splat(side),
+                    &mut self.hue,
+                    &mut self.saturation,
+                    &mut self.value,
+                );
+                ui.add_space(4.0);
+                changed |= picker::hue_strip(
+                    ui,
+                    &mut self.textures,
+                    Vec2::new(side, 14.0),
+                    &mut self.hue,
+                );
+                if changed {
+                    self.colour_from_picker();
+                }
+            });
+
+            ui.add_space(10.0);
+            ui.vertical(|ui| self.match_controls(ui));
+        });
+    }
+
+    /// Slot preference, dye spots and variance, sitting beside the picker.
+    fn match_controls(&mut self, ui: &mut egui::Ui) {
+        ui.label("Slot");
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            let mut chosen = self.prefer;
+            for n in 1..=5usize {
+                let selected = self.prefer == Some(n - 1);
+                let button = egui::Button::new(format!("{n}")).selected(selected);
+                if ui.add_sized([22.0, 20.0], button).clicked() {
+                    chosen = if selected { None } else { Some(n - 1) };
+                }
+            }
+            self.prefer = chosen;
         });
 
-        let width = ui.available_width().min(120.0);
-
-        let mut changed = picker::saturation_value_square(
-            ui,
-            &mut self.textures,
-            Vec2::new(width, width),
-            &mut self.hue,
-            &mut self.saturation,
-            &mut self.value,
-        );
-
-        ui.add_space(4.0);
-        changed |= picker::hue_strip(
-            ui,
-            &mut self.textures,
-            Vec2::new(width, 14.0),
-            &mut self.hue,
-        );
-
-        if changed {
-            self.colour_from_picker();
-        }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label("Dye spots");
+            ui.add_sized(
+                [46.0, 18.0],
+                egui::DragValue::new(&mut self.slots).range(1..=5).speed(0.1),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label("Variance ±");
+            ui.add_sized(
+                [46.0, 18.0],
+                egui::DragValue::new(&mut self.variance).range(0..=255).speed(1.0),
+            );
+        });
+        ui.add_space(3.0);
+        ui.spacing_mut().slider_width = (ui.available_width() - 10.0).max(60.0);
+        ui.add(egui::Slider::new(&mut self.variance, 0..=255).show_value(false));
     }
 
     fn preview_panel(&mut self, ui: &mut egui::Ui) {
@@ -315,6 +348,12 @@ impl DyeTraceApp {
 
         let Some(scan) = &self.scan else {
             ui.painter().rect_filled(rect, 2.0, Color32::from_gray(28));
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                Stroke::new(1.0_f32, Color32::from_gray(70)),
+                egui::StrokeKind::Inside,
+            );
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -350,13 +389,31 @@ impl DyeTraceApp {
             );
         }
 
-        // sample offsets around the pointer
-        for (dx, dy) in &scan.table {
+        // sample offsets around the pointer, numbered to match the slot picker
+        for (index, (dx, dy)) in scan.table.iter().enumerate() {
             let point = to_screen(scan.pointer.0 + dx, scan.pointer.1 + dy);
-            if rect.contains(point) {
-                ui.painter()
-                    .circle_stroke(point, 2.5, Stroke::new(1.0_f32, Color32::from_gray(120)));
+            if !rect.contains(point) {
+                continue;
             }
+            let chosen = self.prefer == Some(index);
+            let colour = if chosen {
+                Color32::from_rgb(20, 90, 220)
+            } else {
+                Color32::from_gray(120)
+            };
+            let width = if chosen { 2.0_f32 } else { 1.0_f32 };
+            ui.painter().circle_stroke(
+                point,
+                if chosen { 5.0 } else { 2.5 },
+                Stroke::new(width, colour),
+            );
+            ui.painter().text(
+                point + Vec2::new(5.0, -5.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("{}", index + 1),
+                egui::FontId::proportional(10.0),
+                colour,
+            );
         }
 
         // the best position

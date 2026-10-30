@@ -109,6 +109,28 @@ pub fn search(grid: &Image, offsets: &[(i32, i32)], want: Rgb, tolerance: u8) ->
     search_with(grid, offsets, &colours, tolerance)
 }
 
+/// What a search should ask for: one colour per sample, and how many of them
+/// must hold it.
+///
+/// A chosen sample takes priority over the count - only that one is asked for
+/// the colour, and one hit is enough.  Without a choice every sample is asked,
+/// and `slots` of them must match.  An index the table does not have is ignored
+/// rather than treated as a miss.
+pub fn plan(
+    len: usize,
+    want: Rgb,
+    slots: usize,
+    prefer: Option<usize>,
+) -> (Vec<Option<Rgb>>, usize) {
+    if let Some(index) = prefer.filter(|index| *index < len) {
+        let mut colours = vec![None; len];
+        colours[index] = Some(want);
+        return (colours, 1);
+    }
+    let need = slots.clamp(1, len.max(1));
+    (vec![Some(want); len], need)
+}
+
 /// The preview picture the original draws: white, with red where the colour is.
 pub fn hit_map(grid: &Image, want: Rgb, tolerance: u8) -> Vec<u32> {
     let mut out = vec![crate::colour::COL_WHITE; SCAN_W * SCAN_H];

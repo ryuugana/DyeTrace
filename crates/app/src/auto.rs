@@ -31,6 +31,14 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                     .map_err(|_| "--slots needs 1-5")?;
                 i += 2;
             }
+            "--slot" => {
+                let n: usize = value("--slot")?.parse().map_err(|_| "--slot needs 1-5")?;
+                if !(1..=dyetrace_core::MAX_TARGETS).contains(&n) {
+                    return Err("--slot needs 1-5".to_string());
+                }
+                opts.prefer = Some(n - 1);
+                i += 2;
+            }
             "--cycles" => {
                 opts.max_cycles = value("--cycles")?
                     .parse()
@@ -104,8 +112,12 @@ pub fn run(args: &[String]) -> i32 {
             samples,
             clicked,
         } => {
+            let what = match opts.prefer {
+                Some(index) => format!("slot {} holds", index + 1),
+                None => format!("{count}/{samples} samples hold"),
+            };
             println!(
-                "{} ({x},{y}) after {cycles} cycle(s): {count}/{samples} samples hold #{}",
+                "{} ({x},{y}) after {cycles} cycle(s): {what} #{}",
                 if clicked { "clicked" } else { "would click" },
                 format!("{:02X}{:02X}{:02X}", opts.colour.r, opts.colour.g, opts.colour.b)
             );

@@ -37,6 +37,9 @@ pub struct Options {
     pub variance: u8,
     /// How many of the five samples must hold the colour.
     pub slots: usize,
+    /// Preferred sample, as an index into the measured table.  When set it
+    /// takes priority over `slots`: only that sample is asked for the colour.
+    pub prefer: Option<usize>,
     /// Offsets of the client's Pick Color / Cancel buttons from the palette.
     pub pick_x: i32,
     pub cancel_x: i32,
@@ -64,6 +67,7 @@ impl Default for Options {
             colour: Rgb::black(),
             variance: 0,
             slots: 1,
+            prefer: None,
             pick_x: 147,
             cancel_x: 231,
             button_y: 397,
@@ -450,7 +454,8 @@ pub fn scan_once(
 ) -> Result<Scan, ScanFail> {
     let id = window.find().ok_or(ScanFail::NoClient)?;
     let prep = prepare(window, screen, mouse, id, opts, &mut |_: &str| {})?;
-    let best = search::search(&prep.grid, &prep.table, opts.colour, opts.variance);
+    let (colours, _) = wanted(opts, prep.table.len());
+    let best = search::search_with(&prep.grid, &prep.table, &colours, opts.variance);
 
     Ok(Scan {
         rect: prep.board.rect,
@@ -503,6 +508,12 @@ fn cancel_roll(
         }
     }
     false
+}
+
+/// The colours to look for, one entry per measured sample, and how many of them
+/// must hold it.  A chosen slot takes priority over the slot count.
+fn wanted(opts: &Options, len: usize) -> (Vec<Option<Rgb>>, usize) {
+    search::plan(len, opts.colour, opts.slots, opts.prefer)
 }
 
 /// Run the full cycle until a match is clicked, the colour runs out, or the
@@ -574,17 +585,25 @@ pub fn run(
             prep.pointer.1
         ));
 
-        if let Some(best) = search::search(&prep.grid, &prep.table, opts.colour, opts.variance) {
-            report(&format!(
-                "  best=({},{}) {}/{} need={}",
-                best.x,
-                best.y,
-                best.count,
-                prep.table.len(),
-                opts.slots
-            ));
+        let (colours, need) = wanted(opts, prep.table.len());
+        if let Some(best) = search::search_with(&prep.grid, &prep.table, &colours, opts.variance) {
+            match opts.prefer.filter(|index| *index < prep.table.len()) {
+                Some(index) => report(&format!(
+                    "  best=({},{}) slot {} holds it",
+                    best.x,
+                    best.y,
+                    index + 1
+                )),
+                None => report(&format!(
+                    "  best=({},{}) {}/{} need={need}",
+                    best.x,
+                    best.y,
+                    best.count,
+                    prep.table.len()
+                )),
+            }
 
-            if best.count >= opts.slots && prep.table.len() >= MIN_SLOTS {
+            if best.count >= need && prep.table.len() >= MIN_SLOTS {
                 window.focus(id);
                 let (mx, my) = button(&prep.board, best.x, best.y);
                 if !mouse.move_to(mx, my) {
