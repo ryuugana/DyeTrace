@@ -391,11 +391,12 @@ impl DyeTraceApp {
 
         // sample offsets around the pointer, numbered to match the slot picker
         for (index, (dx, dy)) in scan.table.iter().enumerate() {
+            let slot = scan.slots.get(index).copied().unwrap_or(index);
             let point = to_screen(scan.pointer.0 + dx, scan.pointer.1 + dy);
             if !rect.contains(point) {
                 continue;
             }
-            let chosen = self.prefer == Some(index);
+            let chosen = self.prefer == Some(slot);
             let colour = if chosen {
                 Color32::from_rgb(20, 90, 220)
             } else {
@@ -410,7 +411,7 @@ impl DyeTraceApp {
             ui.painter().text(
                 point + Vec2::new(5.0, -5.0),
                 egui::Align2::LEFT_BOTTOM,
-                format!("{}", index + 1),
+                format!("{}", slot + 1),
                 egui::FontId::proportional(10.0),
                 colour,
             );

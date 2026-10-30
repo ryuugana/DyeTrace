@@ -66,7 +66,14 @@ fn draw(armed: bool, pointer: (i32, i32), _roll: u8) -> Image {
     if armed && over_grid {
         for (i, (dx, dy)) in OFFSETS.iter().enumerate() {
             let fill = Rgb::new(0x30 + i as u8 * 20, 0x90, 0x60);
-            legend_box(&mut img, PAL.0 + pointer.0 + dx + 10, PAL.1 + pointer.1 + dy, fill);
+            // The box's centre sits 10 px right of its crosshair, and the ring
+            // is 8 px across, so its top-left corner is half a box up and left.
+            legend_box(
+                &mut img,
+                PAL.0 + pointer.0 + dx + 10 - 4,
+                PAL.1 + pointer.1 + dy - 4,
+                fill,
+            );
         }
     }
     img
@@ -201,6 +208,12 @@ fn an_idle_window_is_armed_with_one_pick_color_press() {
         .expect("one press should arm the picker and reveal the legend");
 
     assert!(scan.armed, "the picker had to be armed");
+    assert_eq!(
+        scan.table[0],
+        (0, 0),
+        "slot 1 is the pointer, got {:?}",
+        scan.table
+    );
     assert_eq!(client.at_button(pick_button()), 1, "clicks {:?}", client.clicks());
     assert_eq!(client.at_button(cancel_button()), 0, "Cancel was never needed");
     assert!(!client.closed.get(), "the dye window must still be open");

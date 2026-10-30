@@ -224,10 +224,15 @@ fn run_replay(args: &[String]) -> i32 {
             );
         }
 
-        let table = offsets::from_boxes(&boxes, pointer);
-        println!("offsets    {} (pointer at both {})", table.len(), format!("{},{}", pointer.0, pointer.1));
+        let (table, slots) = offsets::ordered(&offsets::from_boxes(&boxes, pointer));
+        println!(
+            "offsets    {} (pointer at {},{})",
+            table.len(),
+            pointer.0,
+            pointer.1
+        );
         for (i, (dx, dy)) in table.iter().enumerate() {
-            println!("  slot {i}  {dx:+},{dy:+}");
+            println!("  slot {}  {dx:+},{dy:+}", slots[i] + 1);
         }
 
         if table.len() < dyetrace_core::MIN_SLOTS {

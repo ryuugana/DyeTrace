@@ -110,8 +110,12 @@ pub struct Scan {
     pub pointer: (i32, i32),
     /// Legend boxes found, in palette pixels.
     pub boxes: Vec<(i32, i32)>,
-    /// Sample offsets relative to the pointer.
+    /// Sample offsets relative to the pointer, in the client's slot order.
     pub table: Vec<(i32, i32)>,
+    /// The slot each entry of `table` belongs to, numbered the way the dye
+    /// window numbers its previews: 0 is the sample under the pointer, 1 and 2
+    /// are above it, 3 and 4 below.
+    pub slots: Vec<usize>,
     /// Best candidate and its score.
     pub best: Option<search::Match>,
     /// Whether this scan had to arm the picker itself.
@@ -158,6 +162,7 @@ struct Prepared {
     pointer: (i32, i32),
     boxes: Vec<(i32, i32)>,
     table: Vec<(i32, i32)>,
+    slots: Vec<usize>,
     armed: bool,
 }
 
@@ -430,14 +435,19 @@ fn prepare(
 
         match read_offsets(window, screen, mouse, id, &board, log) {
             Ok((table, pointer, boxes)) => {
+                // Number the samples the way the client's preview swatches are
+                // numbered, so a chosen slot means the same thing to the player
+                // and to the search.
+                let (table, slots) = offsets::ordered(&table);
                 return Ok(Prepared {
                     board,
                     grid,
                     pointer,
                     boxes,
                     table,
+                    slots,
                     armed: presses > 0,
-                })
+                });
             }
             Err(ScanFail::NoLegend) if label == label::Label::PickColor => continue,
             Err(other) => return Err(other),
@@ -454,7 +464,7 @@ pub fn scan_once(
 ) -> Result<Scan, ScanFail> {
     let id = window.find().ok_or(ScanFail::NoClient)?;
     let prep = prepare(window, screen, mouse, id, opts, &mut |_: &str| {})?;
-    let (colours, _) = wanted(opts, prep.table.len());
+    let (colours, _) = wanted(opts, &prep);
     let best = search::search_with(&prep.grid, &prep.table, &colours, opts.variance);
 
     Ok(Scan {
@@ -464,6 +474,7 @@ pub fn scan_once(
         pointer: prep.pointer,
         boxes: prep.boxes,
         table: prep.table,
+        slots: prep.slots,
         best,
         armed: prep.armed,
     })
@@ -511,9 +522,13 @@ fn cancel_roll(
 }
 
 /// The colours to look for, one entry per measured sample, and how many of them
-/// must hold it.  A chosen slot takes priority over the slot count.
-fn wanted(opts: &Options, len: usize) -> (Vec<Option<Rgb>>, usize) {
-    search::plan(len, opts.colour, opts.slots, opts.prefer)
+/// must hold it.  A chosen slot takes priority over the slot count, and is
+/// looked up through the scan's slot map so a partial read cannot shift it.
+fn wanted(opts: &Options, prep: &Prepared) -> (Vec<Option<Rgb>>, usize) {
+    let prefer = opts
+        .prefer
+        .and_then(|slot| prep.slots.iter().position(|mine| *mine == slot));
+    search::plan(prep.table.len(), opts.colour, opts.slots, prefer)
 }
 
 /// Run the full cycle until a match is clicked, the colour runs out, or the
@@ -585,14 +600,14 @@ pub fn run(
             prep.pointer.1
         ));
 
-        let (colours, need) = wanted(opts, prep.table.len());
+        let (colours, need) = wanted(opts, &prep);
         if let Some(best) = search::search_with(&prep.grid, &prep.table, &colours, opts.variance) {
-            match opts.prefer.filter(|index| *index < prep.table.len()) {
-                Some(index) => report(&format!(
+            match opts.prefer.filter(|slot| prep.slots.contains(slot)) {
+                Some(slot) => report(&format!(
                     "  best=({},{}) slot {} holds it",
                     best.x,
                     best.y,
-                    index + 1
+                    slot + 1
                 )),
                 None => report(&format!(
                     "  best=({},{}) {}/{} need={need}",
