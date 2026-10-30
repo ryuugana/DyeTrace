@@ -79,7 +79,7 @@ they disappear until a run measures them again.
 
 | Control | Meaning |
 |---|---|
-| `Selected colour` / `Save as…` | Named colours, stored in `presets.txt` next to the executable. |
+| `Selected colour` / `Save as�` | Named colours, stored in `presets.txt` next to the executable. The box names the colour you have: a saved name when it matches one, `Custom` otherwise. |
 | `R` `G` `B`, `Hex` | The dye colour. All three stay in sync with the picker. |
 | Colour square + hue strip | Pick the colour visually; the square follows the chosen colour. |
 | `Slot` | Optional. Press 1–5 to require those samples to hold the colour; press a number again to clear it. Several can be picked. The numbers are the ones the dye window prints above its five previews: 1 is under the cursor, 2–3 above it, 4–5 below. |
@@ -205,6 +205,8 @@ anything, which makes it the safe way to check a C build.
 | `selftest.txt` | Output of `--selftest`. |
 | `probe.txt`, `*.bmp` | Output of `--probe` (palette detection diagnostics). |
 | `autotest.txt` | Output of `--autotest`. |
+| `config.txt` | The window's own settings, next to the executable: colour, dye spots, retries, variance, chosen slots and the stop key. Written as soon as any of them changes. |
+| `presets.txt` | The named colours, one name and hex per line. |
 
 ## Credits
 

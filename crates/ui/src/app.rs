@@ -1,6 +1,7 @@
 //! The window: controls on the left, colour picker and match preview on the
 //! right.
 
+use crate::config::Config;
 use crate::hotkey::{self, StopKey};
 use crate::hsv;
 use crate::picker::{self, PickerTextures};
@@ -64,9 +65,11 @@ pub struct DyeTraceApp {
     recording: bool,
     /// Is the About window open?
     about: bool,
+    /// The settings as they were last written out.
+    saved: Config,
+
     scan: Option<Scan>,
     status: String,
-
 }
 
 impl DyeTraceApp {
@@ -76,20 +79,22 @@ impl DyeTraceApp {
         cc.egui_ctx
             .options_mut(|options| options.theme_preference = egui::ThemePreference::Dark);
 
+        let saved = Config::load();
         let preview = Preview::spawn();
         let worker = Worker::spawn(&preview);
         let stop_key = StopKey::watch(worker.stop_flag().expect("worker stop flag"));
+        stop_key.set(saved.stop_key);
 
         let mut app = Self {
-            colour: Rgb::black(),
-            hex_text: "000000".to_string(),
+            colour: saved.colour,
+            hex_text: String::new(),
             hue: 0.0,
             saturation: 0.0,
             value: 0.0,
-            slots: 1,
-            variance: 0,
-            retries: 20,
-            slots_only: Vec::new(),
+            slots: saved.spots,
+            variance: saved.variance,
+            retries: saved.retries,
+            slots_only: saved.slots.clone(),
             presets: Presets::load(),
             save_name: String::new(),
             textures: PickerTextures::default(),
@@ -98,13 +103,15 @@ impl DyeTraceApp {
             preview,
             worker,
             stop_key,
-            stop_on: hotkey::default_key(),
+            stop_on: hotkey::key_for(saved.stop_key).unwrap_or_else(hotkey::default_key),
             recording: false,
             about: false,
+            saved,
             scan: None,
             status: "watching for the dye window".to_string(),
         };
-        app.set_colour(Rgb::black());
+
+        app.set_colour(app.colour);
         app
     }
 
@@ -118,6 +125,13 @@ impl DyeTraceApp {
         }
         self.saturation = s;
         self.value = v;
+    }
+
+    /// The name of the current colour: a saved one if it matches, otherwise
+    /// "Custom".  The latest match wins, so a colour saved under a new name is
+    /// shown under that name.
+    fn colour_name(&self) -> String {
+        self.presets.name_of(self.colour).unwrap_or("Custom").to_string()
     }
 
     /// Take the next key the player presses as the stop key.
@@ -138,6 +152,23 @@ impl DyeTraceApp {
             self.stop_on = key;
             self.stop_key.set(code);
             self.recording = false;
+        }
+    }
+
+    /// Write the settings out when any of them changed.
+    fn remember(&mut self) {
+        let current = Config {
+            colour: self.colour,
+            spots: self.slots,
+            retries: self.retries,
+            variance: self.variance,
+            slots: self.slots_only.clone(),
+            stop_key: hotkey::virtual_key(self.stop_on).unwrap_or(self.saved.stop_key),
+        };
+
+        if current != self.saved {
+            current.save();
+            self.saved = current;
         }
     }
 
@@ -216,17 +247,12 @@ impl DyeTraceApp {
             let width = ui.available_width() - 86.0;
             egui::ComboBox::from_id_salt("presets")
                 .width(width.max(120.0))
-                .selected_text(
-                    self.presets
-                        .selected()
-                        .map(|p| p.name.clone())
-                        .unwrap_or_else(|| "custom".to_string()),
-                )
+                .selected_text(self.colour_name())
                 .show_ui(ui, |ui| {
                     for (index, preset) in self.presets.items.iter().enumerate() {
                         if ui
                             .selectable_label(
-                                self.presets.selected == index,
+                                preset.colour == self.colour,
                                 format!("{:<12} #{}", preset.name, worker::hex(preset.colour)),
                             )
                             .clicked()
@@ -246,7 +272,6 @@ impl DyeTraceApp {
             }
         });
         if let Some(index) = picked {
-            self.presets.selected = index;
             let colour = self.presets.items[index].colour;
             self.set_colour(colour);
         }
@@ -263,10 +288,17 @@ impl DyeTraceApp {
         ui.label(RichText::new("RGB").strong());
         ui.horizontal(|ui| {
             let mut changed = false;
-            for (label, channel) in [("R", &mut self.colour.r), ("G", &mut self.colour.g), ("B", &mut self.colour.b)] {
+            for (label, channel) in [
+                ("R", &mut self.colour.r),
+                ("G", &mut self.colour.g),
+                ("B", &mut self.colour.b),
+            ] {
                 ui.label(label);
                 if ui
-                    .add_sized([58.0, 20.0], egui::DragValue::new(channel).range(0..=255).speed(1.0))
+                    .add_sized(
+                        [58.0, 20.0],
+                        egui::DragValue::new(channel).range(0..=255).speed(1.0),
+                    )
                     .changed()
                 {
                     changed = true;
@@ -324,7 +356,10 @@ impl DyeTraceApp {
             }
 
             ui.label("Stop key");
-            if ui.add_sized([40.0, 26.0], egui::Button::new("Set")).clicked() {
+            if ui
+                .add_sized([40.0, 26.0], egui::Button::new("Set"))
+                .clicked()
+            {
                 self.recording = true;
             }
             let shown = if self.recording {
@@ -533,14 +568,23 @@ impl DyeTraceApp {
         // the best position
         if let Some(best) = offsets.best {
             let centre = to_screen(best.x, best.y);
-            ui.painter()
-                .circle_stroke(centre, 7.0, Stroke::new(2.0_f32, Color32::from_rgb(0, 255, 140)));
+            ui.painter().circle_stroke(
+                centre,
+                7.0,
+                Stroke::new(2.0_f32, Color32::from_rgb(0, 255, 140)),
+            );
             ui.painter().line_segment(
-                [centre + Vec2::new(-11.0, 0.0), centre + Vec2::new(11.0, 0.0)],
+                [
+                    centre + Vec2::new(-11.0, 0.0),
+                    centre + Vec2::new(11.0, 0.0),
+                ],
                 Stroke::new(1.0_f32, Color32::from_rgb(0, 255, 140)),
             );
             ui.painter().line_segment(
-                [centre + Vec2::new(0.0, -11.0), centre + Vec2::new(0.0, 11.0)],
+                [
+                    centre + Vec2::new(0.0, -11.0),
+                    centre + Vec2::new(0.0, 11.0),
+                ],
                 Stroke::new(1.0_f32, Color32::from_rgb(0, 255, 140)),
             );
         }
@@ -566,8 +610,9 @@ impl DyeTraceApp {
                 ui.add_space(6.0);
                 ui.label("Open the Dye window in game and leave it visible.");
                 ui.label(
-                    "The picture on the right is the palette: white where the colour is not there, red where it is.",
+                    "The picture on the right is the palette: white where the colour is not, red where it is.",
                 );
+                ui.add_space(8.0);
                 ui.label("1. Pick the colour: RGB, hex, or the square.");
                 ui.label("2. Dye spots is how many of the five samples must hold it;");
                 ui.label("   Slot pins particular samples the dye window numbers 1 to 5.");
@@ -594,7 +639,6 @@ impl DyeTraceApp {
         });
         ui.add_space(6.0);
     }
-
 }
 
 impl eframe::App for DyeTraceApp {
@@ -615,7 +659,6 @@ impl eframe::App for DyeTraceApp {
 
         egui::SidePanel::left("controls")
             .resizable(false)
-            .default_width(340.0)
             .exact_width(310.0)
             .show(ctx, |ui| {
                 self.controls(ui);
@@ -626,5 +669,6 @@ impl eframe::App for DyeTraceApp {
         });
 
         self.about_window(ctx);
+        self.remember();
     }
 }

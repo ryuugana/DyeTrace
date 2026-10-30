@@ -15,11 +15,10 @@ pub struct Preset {
 #[derive(Clone, Debug, Default)]
 pub struct Presets {
     pub items: Vec<Preset>,
-    pub selected: usize,
 }
 
 fn path() -> PathBuf {
-    PathBuf::from(FILE_NAME)
+    crate::config::data_dir().join(FILE_NAME)
 }
 
 impl Presets {
@@ -58,11 +57,19 @@ impl Presets {
             }
         }
 
-        Self { items, selected: 0 }
+        Self { items }
     }
 
-    pub fn selected(&self) -> Option<&Preset> {
-        self.items.get(self.selected)
+    /// The saved name for a colour, or none if it has never been saved.
+    ///
+    /// The latest name wins, so saving a colour again under a new name shows
+    /// that name.
+    pub fn name_of(&self, colour: Rgb) -> Option<&str> {
+        self.items
+            .iter()
+            .rev()
+            .find(|preset| preset.colour == colour)
+            .map(|preset| preset.name.as_str())
     }
 
     /// Add (or update) a named colour and persist the list.
@@ -76,14 +83,8 @@ impl Presets {
 
         if let Some(existing) = self.items.iter_mut().find(|p| p.name == name) {
             existing.colour = colour;
-            self.selected = self
-                .items
-                .iter()
-                .position(|p| p.name == name)
-                .unwrap_or(self.selected);
         } else {
             self.items.push(Preset { name, colour });
-            self.selected = self.items.len() - 1;
         }
 
         self.persist();
@@ -98,5 +99,47 @@ impl Presets {
             ));
         }
         let _ = fs::write(path(), text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn presets() -> Presets {
+        Presets {
+            items: vec![
+                Preset {
+                    name: "Black".to_string(),
+                    colour: Rgb::new(0, 0, 0),
+                },
+                Preset {
+                    name: "White".to_string(),
+                    colour: Rgb::new(255, 255, 255),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_saved_colour_knows_its_name() {
+        assert_eq!(presets().name_of(Rgb::new(0, 0, 0)), Some("Black"));
+        assert_eq!(presets().name_of(Rgb::new(255, 255, 255)), Some("White"));
+    }
+
+    #[test]
+    fn an_unsaved_colour_has_no_name() {
+        assert_eq!(presets().name_of(Rgb::new(0, 255, 0)), None);
+    }
+
+    #[test]
+    fn the_latest_name_for_a_colour_wins() {
+        let mut presets = presets();
+        presets.items.push(Preset {
+            name: "Ink".to_string(),
+            colour: Rgb::new(0, 0, 0),
+        });
+
+        assert_eq!(presets.name_of(Rgb::new(0, 0, 0)), Some("Ink"));
     }
 }
