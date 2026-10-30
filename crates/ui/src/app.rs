@@ -4,9 +4,11 @@
 use crate::hsv;
 use crate::picker::{self, PickerTextures};
 use crate::presets::Presets;
+use crate::preview::Preview;
 use crate::worker::{self, Job, Msg, Worker};
 
-use dyetrace_core::image::Rgb;
+use dyetrace_core::image::{Image, Rgb};
+use dyetrace_core::search;
 use dyetrace_engine::cycle::{Options, Scan};
 
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, TextureHandle, Vec2};
@@ -15,6 +17,25 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, TextureHandle, Vec2};
 enum Tab {
     Dye,
     Advanced,
+}
+
+/// What a scan measured on one roll of the palette.
+struct Offsets {
+    pointer: (i32, i32),
+    table: Vec<(i32, i32)>,
+    slots: Vec<usize>,
+    boxes: Vec<(i32, i32)>,
+    best: Option<search::Match>,
+}
+
+/// A fingerprint of a palette, for the texture cache.
+fn signature_key(signature: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in signature {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
 }
 
 pub struct DyeTraceApp {
@@ -35,8 +56,9 @@ pub struct DyeTraceApp {
 
     textures: PickerTextures,
     hit_texture: Option<TextureHandle>,
-    hit_key: (u32, u8),
+    hit_key: (u32, u8, u64),
 
+    preview: Preview,
     worker: Worker,
     scan: Option<Scan>,
     status: String,
@@ -50,6 +72,7 @@ impl DyeTraceApp {
         cc.egui_ctx
             .options_mut(|options| options.theme_preference = egui::ThemePreference::Dark);
 
+        let preview = Preview::spawn();
         let mut app = Self {
             colour: Rgb::black(),
             hex_text: "000000".to_string(),
@@ -63,10 +86,11 @@ impl DyeTraceApp {
             save_name: String::new(),
             textures: PickerTextures::default(),
             hit_texture: None,
-            hit_key: (u32::MAX, 0),
-            worker: Worker::spawn(),
+            hit_key: (u32::MAX, 0, 0),
+            worker: Worker::spawn(&preview),
+            preview,
             scan: None,
-            status: "open the dye window in game, then press Find".to_string(),
+            status: "watching for the dye window".to_string(),
             tab: Tab::Dye,
         };
         app.set_colour(Rgb::black());
@@ -108,7 +132,7 @@ impl DyeTraceApp {
             match message {
                 Msg::Status(text) => self.status = text,
                 Msg::Scanned(scan) => {
-                    self.hit_key = (u32::MAX, 0);
+                    self.hit_key = (u32::MAX, 0, 0);
                     self.scan = Some(*scan);
                 }
                 Msg::Finished => {
@@ -123,14 +147,13 @@ impl DyeTraceApp {
         }
     }
 
-    fn ensure_hit_texture(&mut self, ctx: &egui::Context) {
-        let Some(scan) = &self.scan else { return };
-        let key = (self.colour.to_u32(), self.variance);
+    fn ensure_hit_texture(&mut self, ctx: &egui::Context, grid: &Image, signature: &[u8]) {
+        let key = (self.colour.to_u32(), self.variance, signature_key(signature));
         if self.hit_texture.is_some() && key == self.hit_key {
             return;
         }
 
-        let map = scan.hit_map(self.colour, self.variance);
+        let map = search::hit_map(grid, self.colour, self.variance);
         let mut pixels = Vec::with_capacity(map.len());
         for value in map {
             let (r, g, b) = (
@@ -335,13 +358,29 @@ impl DyeTraceApp {
     }
 
     fn preview_panel(&mut self, ui: &mut egui::Ui) {
-        self.ensure_hit_texture(ui.ctx());
+        let snapshot = self.preview.latest();
+        if let Some(snapshot) = &snapshot {
+            self.ensure_hit_texture(ui.ctx(), &snapshot.grid, &snapshot.signature);
+        }
+
+        // The offsets belong to the roll they were measured on: once the palette
+        // is rolled again they mean nothing and are not drawn.
+        let offsets = match (&snapshot, &self.scan) {
+            (Some(snapshot), Some(scan)) if snapshot.shows(&scan.signature) => Some(Offsets {
+                pointer: scan.pointer,
+                table: scan.table.clone(),
+                slots: scan.slots.clone(),
+                boxes: scan.boxes.clone(),
+                best: scan.best,
+            }),
+            _ => None,
+        };
 
         let available = ui.available_size();
         let side = available.x.min(available.y - 24.0).clamp(160.0, 460.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
 
-        let Some(scan) = &self.scan else {
+        if snapshot.is_none() {
             ui.painter().rect_filled(rect, 2.0, Color32::from_gray(28));
             ui.painter().rect_stroke(
                 rect,
@@ -352,18 +391,22 @@ impl DyeTraceApp {
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "press Scan to search the gradient",
+                "waiting for the dye window",
                 egui::FontId::proportional(13.0),
                 Color32::from_gray(140),
             );
             return;
-        };
+        }
 
         if let Some(texture) = &self.hit_texture {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             ui.painter()
                 .image(texture.id(), rect, uv, Color32::WHITE);
         }
+
+        let Some(offsets) = offsets else {
+            return;
+        };
 
         let scale = rect.width() / dyetrace_core::SCAN_W as f32;
         let to_screen = |x: i32, y: i32| {
@@ -374,7 +417,7 @@ impl DyeTraceApp {
         };
 
         // legend boxes the client drew
-        for (bx, by) in &scan.boxes {
+        for (bx, by) in &offsets.boxes {
             let centre = to_screen(*bx, *by);
             ui.painter().rect_stroke(
                 egui::Rect::from_center_size(centre, Vec2::splat(5.0)),
@@ -385,9 +428,9 @@ impl DyeTraceApp {
         }
 
         // sample offsets around the pointer, numbered to match the slot picker
-        for (index, (dx, dy)) in scan.table.iter().enumerate() {
-            let slot = scan.slots.get(index).copied().unwrap_or(index);
-            let point = to_screen(scan.pointer.0 + dx, scan.pointer.1 + dy);
+        for (index, (dx, dy)) in offsets.table.iter().enumerate() {
+            let slot = offsets.slots.get(index).copied().unwrap_or(index);
+            let point = to_screen(offsets.pointer.0 + dx, offsets.pointer.1 + dy);
             if !rect.contains(point) {
                 continue;
             }
@@ -413,7 +456,7 @@ impl DyeTraceApp {
         }
 
         // the best position
-        if let Some(best) = scan.best {
+        if let Some(best) = offsets.best {
             let centre = to_screen(best.x, best.y);
             ui.painter()
                 .circle_stroke(centre, 7.0, Stroke::new(2.0_f32, Color32::from_rgb(0, 255, 140)));
@@ -455,6 +498,10 @@ impl DyeTraceApp {
 impl eframe::App for DyeTraceApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_worker(ctx);
+
+        // The palette is watched on its own thread; wake up often enough to show
+        // what it found.
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
 
         egui::TopBottomPanel::top("head").show(ctx, |ui| {
             ui.horizontal(|ui| {

@@ -9,6 +9,7 @@ mod app;
 mod hsv;
 mod picker;
 mod presets;
+mod preview;
 mod worker;
 
 fn main() -> eframe::Result<()> {

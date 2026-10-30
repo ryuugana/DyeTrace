@@ -19,7 +19,7 @@ It is not a byte-for-byte port. It reproduces the behaviour by reading the scree
 - **Finds the dye palette automatically** inside the Mabinogi window.
 - **Reads the five sample offsets from the client itself** every attempt, instead of assuming a fixed spacing. The offsets are not universal — they depend on the dye/part set.
 - **Matches by count, not by slot order.** You give one colour, a variance, and how many of the five samples must hold it (1–5).
-- **Shows a hit map** — a white pane with red where the colour exists, the same view the original presents, plus boxes at the sampled positions.
+- **Shows a live hit map** - a white pane with red where the colour exists, the same view the original presents, refreshed twice a second while the dye window is open. Boxes and numbers mark the sampled positions once a scan has measured them.
 - **Auto mode** runs the whole cycle: `Pick Color` → capture → read offsets → search → click, or `Cancel` and try again. Presses are gated on the button's label, so a dye is never applied by accident.
 - **Stops on demand** with the spacebar or the Stop button.
 - **Self-tests** (`--selftest`) so you can check a build without opening the game.
@@ -69,6 +69,13 @@ cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
 `dyetrace-ui.exe` is the window: the controls and the colour picker on the
 left, the search preview on the right, and one line of feedback along the
 bottom.
+
+The preview looks after itself: as soon as the dye window is on screen it shows
+the hit map for the chosen colour, and it keeps it current. It pauses while a
+colour is being picked (the button reads Start Dyeing) and resumes on Cancel,
+because a legend drawn over the grid would otherwise end up in the picture. The
+sample markers belong to the roll they were measured on: once the palette is
+rolled again they disappear until the next Scan.
 
 | Control | Meaning |
 |---|---|
@@ -146,6 +153,8 @@ The legacy GUI (`legacy\c-reference`) has the field table below.
 1. **Locate the palette.** The dye palette is a 256×256 square, so DyeTrace looks for the square whose four borders are edges and whose interior varies. That works regardless of which colours the palette happens to contain.
 2. **Capture once per attempt.** The gradient is grabbed right after `Pick Color` and before the cursor touches it, so the image never contains the client's marker graphics. The cursor waits below the palette in between, where the client's camera cannot take it.
 3. **Read the sample offsets.** Hovering the grid makes the client draw five markers. Each marker is a **crosshair** (the sample point) joined by a short neck to a **legend box** that shows the colour found there; the box sits 10 px to the right of its crosshair. Measured on every box: `box_fill == gradient[box_centre + (-10, 0)]`, exactly. The samples are then numbered the way the dye window numbers its five previews — 1 under the cursor, 2 and 3 above it, 4 and 5 below — so a chosen slot means the same thing on both sides.
+4. **Watch the palette.** A thread of its own grabs the palette every 500 ms and publishes it, so the picture on screen is always current and the engine's own grabs travel the same path: what is drawn is what was searched. The picture is skipped when it would contain a legend, and the thread stops publishing while a colour is being picked.
+5. **Tell one roll from another.** Each published palette carries a coarse signature (the average colour of a 32x32 grid). A scan records the signature it measured, and its offsets are only drawn while the palette still matches — a rolled palette means the offsets are unknown.
 4. **Search.** For every position in the 254×254 palette, sample the five offsets (wrapping ±256, rejecting the separator/background at 254–255) and count how many are within the variance. Keep the best count, then the lowest colour distance. The chosen slots narrow where the hits may come from, as described above; a position only counts when every guaranteed slot holds the colour as well as the spot count being met.
 5. **Act.** Move the cursor to the match and click — or click `Cancel` and start over.
 

@@ -161,4 +161,49 @@ impl Image {
         }
         Some(out)
     }
+
+    /// A coarse fingerprint of the picture: the average colour of each cell of a
+    /// 32x32 grid.  Two grabs of the same palette agree on it; a different roll
+    /// of colours does not.
+    pub fn signature(&self) -> Vec<u8> {
+        let side = SIGNATURE_SIDE;
+        let mut out = Vec::with_capacity(side * side * 3);
+
+        for gy in 0..side {
+            for gx in 0..side {
+                let x0 = gx * self.width / side;
+                let x1 = (gx + 1) * self.width / side;
+                let y0 = gy * self.height / side;
+                let y1 = (gy + 1) * self.height / side;
+
+                let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
+                for y in y0..y1.max(y0 + 1) {
+                    for x in x0..x1.max(x0 + 1) {
+                        let px = self.get(x, y);
+                        r += px.r as u32;
+                        g += px.g as u32;
+                        b += px.b as u32;
+                        n += 1;
+                    }
+                }
+                let n = n.max(1);
+                out.push((r / n) as u8);
+                out.push((g / n) as u8);
+                out.push((b / n) as u8);
+            }
+        }
+
+        out
+    }
+}
+
+/// Side of the grid [`Image::signature`] averages over.
+const SIGNATURE_SIDE: usize = 32;
+
+/// Do two signatures describe the same picture, within a little rendering noise?
+pub fn same_signature(a: &[u8], b: &[u8], tolerance: u8) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(one, other)| one.abs_diff(*other) <= tolerance)
 }

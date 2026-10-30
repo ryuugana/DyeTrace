@@ -9,6 +9,8 @@ use dyetrace_core::image::Rgb;
 use dyetrace_platform::traits::GameWindow;
 use dyetrace_engine::cycle::{self, Options, Scan};
 
+use crate::preview::{Capture, Preview};
+
 #[derive(Clone, Debug)]
 pub enum Job {
     /// Find the palette and report where it is.
@@ -34,15 +36,16 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn spawn() -> Self {
+    pub fn spawn(preview: &Preview) -> Self {
         let (job_tx, job_rx) = channel::<Job>();
         let (msg_tx, msg_rx) = channel::<Msg>();
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
+        let capture = preview.capture();
 
         std::thread::spawn(move || {
             while let Ok(job) = job_rx.recv() {
-                run_job(job, &msg_tx, &thread_stop);
+                run_job(job, &capture, &msg_tx, &thread_stop);
             }
         });
 
@@ -82,16 +85,15 @@ impl Worker {
 }
 
 #[cfg(not(windows))]
-fn run_job(_job: Job, messages: &Sender<Msg>, _stop: &Arc<AtomicBool>) {
+fn run_job(_job: Job, _capture: &Capture, messages: &Sender<Msg>, _stop: &Arc<AtomicBool>) {
     let _ = messages.send(Msg::Finished);
 }
 
 #[cfg(windows)]
-fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
-    use dyetrace_platform_win::{WinMouse, WinScreen, WinWindow};
+fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
+    use dyetrace_platform_win::{WinMouse, WinWindow};
 
     let window = WinWindow::mabinogi();
-    let screen = WinScreen::new();
     let mouse = WinMouse::new();
 
     let send = |msg: Msg| {
@@ -104,7 +106,7 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
             let id = window.find();
             let found = id.and_then(|id| {
                 window.focus(id);
-                cycle::locate(&window, &screen, id)
+                cycle::locate(&window, capture, id)
             });
             match found {
                 Some((rect, origin)) => send(Msg::Status(format!(
@@ -120,7 +122,7 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
         Job::Scan(mut opts) => {
             opts.stop = Some(Arc::clone(stop));
             send(Msg::Status("scanning".to_string()));
-            match cycle::scan_once(&window, &screen, &mouse, &opts) {
+            match cycle::scan_once(&window, capture, &mouse, &opts) {
                 Ok(scan) => {
                     let mut summary = match scan.best {
                         Some(best) => format!(
@@ -145,7 +147,7 @@ fn run_job(job: Job, messages: &Sender<Msg>, stop: &Arc<AtomicBool>) {
         Job::Auto(mut opts) => {
             opts.stop = Some(Arc::clone(stop));
             send(Msg::Status("auto running - Stop to end".to_string()));
-            let outcome = cycle::run(&window, &screen, &mouse, &opts, |_| {});
+            let outcome = cycle::run(&window, capture, &mouse, &opts, |_| {});
             send(Msg::Status(match outcome {
                 cycle::Outcome::Matched {
                     x,

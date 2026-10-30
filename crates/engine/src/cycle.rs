@@ -29,7 +29,7 @@ const LEGEND_TRIES: usize = 4;
 /// How many Pick Color presses one attempt may make before giving up.
 const MAX_PRESSES: usize = 2;
 /// A grab below this percentage of saturated pixels is not a dye palette.
-const MIN_GRADIENT: u32 = 25;
+pub const MIN_GRADIENT: u32 = 25;
 
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -121,6 +121,9 @@ pub struct Scan {
     /// window numbers its previews: 0 is the sample under the pointer, 1 and 2
     /// are above it, 3 and 4 below.
     pub slots: Vec<usize>,
+    /// A coarse fingerprint of `grid`, so a later grab can tell whether the
+    /// same roll of colours is still on screen.
+    pub signature: Vec<u8>,
     /// How many samples the search actually looked at.
     pub asked: usize,
     /// Best candidate and its score.
@@ -473,6 +476,7 @@ pub fn scan_once(
     let prep = prepare(window, screen, mouse, id, opts, &mut |_: &str| {})?;
     let need = need_for(opts, &prep);
     let best = search::search_need(&prep.grid, &prep.table, &need, opts.variance).map(|found| found.at);
+    let signature = prep.grid.signature();
 
     Ok(Scan {
         rect: prep.board.rect,
@@ -482,6 +486,7 @@ pub fn scan_once(
         boxes: prep.boxes,
         table: prep.table,
         slots: prep.slots,
+        signature,
         asked: need.asked(),
         best,
         armed: prep.armed,
