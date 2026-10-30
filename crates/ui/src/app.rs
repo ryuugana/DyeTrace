@@ -566,9 +566,8 @@ impl DyeTraceApp {
                 ui.add_space(6.0);
                 ui.label("Open the Dye window in game and leave it visible.");
                 ui.label(
-                    "The picture on the right is the palette: white where the colour is not",
+                    "The picture on the right is the palette: white where the colour is not there, red where it is.",
                 );
-                ui.label("there, red where it is.");
                 ui.label("1. Pick the colour: RGB, hex, or the square.");
                 ui.label("2. Dye spots is how many of the five samples must hold it;");
                 ui.label("   Slot pins particular samples the dye window numbers 1 to 5.");
@@ -579,7 +578,6 @@ impl DyeTraceApp {
                     "github.com/ryuugana/DyeTrace",
                     "https://github.com/ryuugana/DyeTrace",
                 );
-                ui.label(RichText::new("MIT licensed.").weak().small());
             });
 
         self.about = open;
