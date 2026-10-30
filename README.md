@@ -66,14 +66,14 @@ cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS dyetrace.c /Fe:dyetrace.exe ^
 
 ## Usage
 
-`dyetrace-ui.exe` is the window: a colour on the left, a search preview in the
-middle, and a picker on the right.
+`dyetrace-ui.exe` is the window: the controls and the colour picker on the
+left, the search preview on the right, and a log along the bottom.
 
 | Control | Meaning |
 |---|---|
 | `Selected colour` / `Save as…` | Named colours, stored in `presets.txt` next to the executable. |
 | `R` `G` `B`, `Hex` | The dye colour. All three stay in sync with the picker. |
-| Colour square + hue strip | Pick the colour visually; the marker follows the current one. |
+| Colour square + hue strip | Pick the colour visually; the swatch beside the `Colour` label shows what is chosen, and the square follows it. |
 | `Dye spots` | How many of the five samples must hold the colour (1–5). Which sample holds it does not matter. |
 | `Variance ±` | Per-channel tolerance. `0` = exact match. |
 | `Find field` | Locate the palette and report where it is. |

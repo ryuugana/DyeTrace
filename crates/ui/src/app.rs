@@ -234,6 +234,8 @@ impl DyeTraceApp {
             ui.label(RichText::new("(web)").weak());
         });
 
+        self.picker_panel(ui);
+
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.label("Dye spots");
@@ -271,8 +273,15 @@ impl DyeTraceApp {
         ui.label(RichText::new(&self.status).strong());
     }
 
+    /// The colour picker, directly under the hex box: the square and its hue
+    /// strip, with the chosen colour shown beside the label.
     fn picker_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Colour").strong());
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Colour").strong());
+            picker::swatch(ui, Vec2::new(42.0, 18.0), self.colour);
+        });
+
         let width = ui.available_width().min(120.0);
 
         let mut changed = picker::saturation_value_square(
@@ -295,12 +304,6 @@ impl DyeTraceApp {
         if changed {
             self.colour_from_picker();
         }
-
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            picker::swatch(ui, Vec2::new(48.0, 24.0), self.colour);
-            ui.label(format!("#{}", worker::hex(self.colour)));
-        });
     }
 
     fn preview_panel(&mut self, ui: &mut egui::Ui) {
@@ -439,12 +442,6 @@ impl eframe::App for DyeTraceApp {
                 .exact_width(310.0)
                 .show(ctx, |ui| {
                     self.controls(ui);
-
-                    // Keep the picker at the bottom of the column.
-                    let keep = 190.0;
-                    let slack = (ui.available_height() - keep).max(0.0);
-                    ui.add_space(slack);
-                    self.picker_panel(ui);
                 });
 
             egui::CentralPanel::default().show(ctx, |ui| {
