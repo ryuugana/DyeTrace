@@ -7,9 +7,10 @@
 //! is safe to press; a live legend means the picker is already armed and the
 //! button reads "Start Dyeing", where Cancel is safe and Pick Color is not.
 //!
-//! Reading the client never raises it: the window is grabbed with
-//! `PrintWindow` when the backend supports it, so the interface stays visible
-//! and usable while a scan runs.
+//! Reading the client never raises it: the window is grabbed with the
+//! backend's whole-window capture when it has one (`PrintWindow` on Windows,
+//! the client's drawable on X11), so the interface stays visible and usable
+//! while a scan runs.
 
 use dyetrace_core::image::{Image, Rgb};
 use dyetrace_core::{label, markers, offsets, palette, search, CAP_H, CAP_W, MAX_TARGETS, MIN_SLOTS};

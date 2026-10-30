@@ -44,16 +44,9 @@ fn write_report(dir: &Path, text: &str) {
     let _ = std::fs::write(dir.join("probe.txt"), text);
 }
 
-#[cfg(not(windows))]
-pub fn run(_args: &[String]) -> i32 {
-    eprintln!("--probe needs the Windows backend");
-    2
-}
-
-#[cfg(windows)]
 pub fn run(args: &[String]) -> i32 {
     use dyetrace_platform::traits::{GameWindow, Screen};
-    use dyetrace_platform_win::{WinScreen, WinWindow};
+    use dyetrace_platform_native::{NativeScreen, NativeWindow};
 
     let opts = match parse(args) {
         Ok(o) => o,
@@ -68,8 +61,8 @@ pub fn run(args: &[String]) -> i32 {
         return 2;
     }
 
-    let window = WinWindow::mabinogi();
-    let screen = WinScreen::new();
+    let window = NativeWindow::mabinogi();
+    let screen = NativeScreen::new();
 
     let id = match window.find() {
         Some(id) => id,
@@ -99,12 +92,13 @@ pub fn run(args: &[String]) -> i32 {
     let deadline = opts.wait_ms / 250 + 1;
     let mut located = None;
     for _ in 0..deadline {
-        let frame = match screen.capture(rect.x, rect.y, rect.w as u32, rect.h as u32) {
-            Some(f) => f,
-            None => {
-                sleep(Duration::from_millis(250));
-                continue;
-            }
+        // Read the client's own drawable first, so the probe sees it even when
+        // another window is on top; a plain screen grab is the fallback.
+        let frame = Screen::capture_window(&screen, id)
+            .or_else(|| screen.capture(rect.x, rect.y, rect.w as u32, rect.h as u32));
+        let Some(frame) = frame else {
+            sleep(Duration::from_millis(250));
+            continue;
         };
         if let Some(origin) = palette::find_square_field(&frame)
             .or_else(|| palette::find_field(&frame))
@@ -117,7 +111,7 @@ pub fn run(args: &[String]) -> i32 {
         sleep(Duration::from_millis(250));
     }
 
-    let (_frame, (ox, oy)) = match located {
+    let (frame, (ox, oy)) = match located {
         Some(v) => v,
         None => {
             report.push_str("palette     not found\n");
@@ -127,7 +121,9 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
-    let grab: Option<Image> = screen.capture(rect.x + ox, rect.y + oy, 256, 256);
+    // Cut the palette out of the frame that was just located, so the picture
+    // written is exactly what the detector saw.
+    let grab: Option<Image> = frame.sub_image(ox, oy, 256, 256);
     let grab = match grab {
         Some(g) => g,
         None => {

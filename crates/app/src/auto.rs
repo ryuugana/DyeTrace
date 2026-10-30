@@ -82,15 +82,8 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     Ok(opts)
 }
 
-#[cfg(not(windows))]
-pub fn run(_args: &[String]) -> i32 {
-    eprintln!("--auto needs the Windows backend");
-    2
-}
-
-#[cfg(windows)]
 pub fn run(args: &[String]) -> i32 {
-    use dyetrace_platform_win::{WinMouse, WinScreen, WinWindow};
+    use dyetrace_platform_native::{NativeMouse, NativeScreen, NativeWindow};
 
     let opts = match parse(args) {
         Ok(o) => o,
@@ -108,9 +101,9 @@ pub fn run(args: &[String]) -> i32 {
     // longer than it should is visible rather than guessed at.
     let start = std::time::Instant::now();
     let outcome = cycle::run(
-        &WinWindow::mabinogi(),
-        &WinScreen::new(),
-        &WinMouse::new(),
+        &NativeWindow::mabinogi(),
+        &NativeScreen::new(),
+        &NativeMouse::new(),
         &opts,
         |line| println!("[{:>5} ms] {line}", start.elapsed().as_millis()),
     );

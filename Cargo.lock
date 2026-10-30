@@ -801,7 +801,7 @@ dependencies = [
  "dyetrace-core",
  "dyetrace-engine",
  "dyetrace-platform",
- "dyetrace-platform-win",
+ "dyetrace-platform-native",
 ]
 
 [[package]]
@@ -824,6 +824,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyetrace-platform-linux"
+version = "0.1.0"
+dependencies = [
+ "dyetrace-core",
+ "dyetrace-platform",
+ "x11rb",
+]
+
+[[package]]
+name = "dyetrace-platform-native"
+version = "0.1.0"
+dependencies = [
+ "dyetrace-platform-linux",
+ "dyetrace-platform-win",
+]
+
+[[package]]
 name = "dyetrace-platform-win"
 version = "0.1.0"
 dependencies = [
@@ -838,7 +855,7 @@ dependencies = [
  "dyetrace-core",
  "dyetrace-engine",
  "dyetrace-platform",
- "dyetrace-platform-win",
+ "dyetrace-platform-native",
  "eframe",
 ]
 

@@ -3,7 +3,7 @@
 //! `--selftest` runs the twelve behaviour checks.
 //! `--replay` drives the same pipeline against saved frames, so palette
 //! detection, box detection and the search can be checked without a client.
-//! `--probe` runs the Windows backend against the live client.
+//! `--probe` runs the native backend against the live client.
 
 mod auto;
 mod mouse_test;

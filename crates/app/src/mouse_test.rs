@@ -1,16 +1,9 @@
 //! `--mouse-test X,Y`: move the pointer and report where it actually is over
 //! the following second.  Used to see whether the client warps the cursor.
 
-#[cfg(not(windows))]
-pub fn run(_args: &[String]) -> i32 {
-    eprintln!("--mouse-test needs the Windows backend");
-    2
-}
-
-#[cfg(windows)]
 pub fn run(args: &[String]) -> i32 {
     use dyetrace_platform::traits::Mouse;
-    use dyetrace_platform_win::WinMouse;
+    use dyetrace_platform_native::NativeMouse;
     use std::thread::sleep;
     use std::time::Duration;
 
@@ -28,7 +21,7 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
-    let mouse = WinMouse::new();
+    let mouse = NativeMouse::new();
     println!("before      {:?}", mouse.position());
     let arrived = mouse.move_to(target.0, target.1);
     println!("move_to     {arrived} -> {:?}", mouse.position());

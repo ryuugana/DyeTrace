@@ -12,8 +12,6 @@ path = "src/main.rs"
 [dependencies]
 dyetrace-core = { path = "../core" }
 dyetrace-platform = { path = "../platform" }
+dyetrace-platform-native = { path = "../platform-native" }
 dyetrace-engine = { path = "../engine" }
 eframe = "0.31"
-
-[target.'cfg(windows)'.dependencies]
-dyetrace-platform-win = { path = "../platform-win" }
