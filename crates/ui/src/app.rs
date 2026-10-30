@@ -47,8 +47,10 @@ const COLUMN_GAP: f32 = 12.0;
 const CARD_GAP: f32 = 8.0;
 /// The line a card's heading takes, so a box can be measured around it.
 const HEADING_ROOM: f32 = 26.0;
-/// The height of the button row, and of the box around it.
+/// The height of the button row, of the box around it, and the gap the buttons
+/// keep between each other.
 const BUTTON_ROW: f32 = 28.0;
+const BUTTON_GAP: f32 = 10.0;
 const BUTTONS_HEIGHT: f32 = BUTTON_ROW + 2.0 * 9.0 + 2.0;
 
 /// Run `add` inside a card, and hand back whatever it returned.
@@ -473,49 +475,65 @@ impl DyeTraceApp {
 
     }
 
-    /// Start, About, and the key that ends a run.
-    ///
-    /// Drawn right to left so the stop key sits against the right edge of the
-    /// box and Start at the left, whatever width the box has.
+    /// Start, About and the stop key: one size, one distance apart, with the key
+    /// that is set shown beside them.
     fn buttons(&mut self, ui: &mut egui::Ui) {
         let busy = self.worker.busy;
         let mut start = false;
         let mut about = false;
 
-        // The row is given its own height: without it the right-to-left layout
-        // hands the card all the space that is going, and the box grows to the
-        // bottom of the window.
+        let key = if self.recording {
+            "press a key".to_string()
+        } else {
+            self.stop_on.name().to_string()
+        };
+        let key_width = ui.fonts(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    key.clone(),
+                    egui::FontId::proportional(15.0),
+                    Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+        });
+
+        // The buttons take what the key name leaves, so a long one such as
+        // Backspace shortens them instead of pushing the row out of the box.
+        let room = ui.available_width().max(200.0);
+        let width = ((room - 3.0 * BUTTON_GAP - key_width) / 3.0).clamp(56.0, 96.0);
+        let total = 3.0 * width + 3.0 * BUTTON_GAP + key_width;
+        let pad = ((room - total) * 0.5).max(0.0);
+
         let size = egui::vec2(ui.available_width(), BUTTON_ROW);
         ui.allocate_ui(size, |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let shown = if self.recording {
-                    "press a key".to_string()
-                } else {
-                    self.stop_on.name().to_string()
+            // The gaps are the ones added below, not egui's own as well.
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.horizontal(|ui| {
+                ui.add_space(pad);
+
+                let button = |label: RichText| {
+                    egui::Button::new(label).min_size(egui::vec2(width, BUTTON_ROW))
                 };
-                ui.label(RichText::new(shown).strong().size(15.0));
-                if ui
-                    .add_sized([40.0, BUTTON_ROW], egui::Button::new("Set"))
-                    .clicked()
-                {
+
+                start = ui
+                    .add_enabled(
+                        !busy,
+                        button(RichText::new("Start").strong()),
+                    )
+                    .clicked();
+                ui.add_space(BUTTON_GAP);
+
+                about = ui.add_enabled(!busy, button(RichText::new("About"))).clicked();
+                ui.add_space(BUTTON_GAP);
+
+                if ui.add(button(RichText::new("Stop Key"))).clicked() {
                     self.recording = true;
                 }
-                ui.label(RichText::new("Stop key").color(Color32::from_gray(170)));
+                ui.add_space(BUTTON_GAP);
 
-                ui.add_space(18.0);
-
-                ui.add_enabled_ui(!busy, |ui| {
-                    about = ui
-                        .add_sized([64.0, BUTTON_ROW], egui::Button::new("About"))
-                        .clicked();
-                    start = ui
-                        .add_sized(
-                            [64.0, BUTTON_ROW],
-                            egui::Button::new(RichText::new("Start").strong()),
-                        )
-                        .clicked();
-                });
-        });
+                ui.label(RichText::new(key).strong().size(15.0));
+            });
         });
 
         if start {
@@ -601,8 +619,12 @@ impl DyeTraceApp {
             _ => None,
         };
 
-        let side = side.min(ui.available_width());
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
+        // The square sits in the middle of the box, however much wider the box is
+        // than the picture the left column left room for.
+        let width = ui.available_width();
+        let side = side.min(width);
+        let (outer, _) = ui.allocate_exact_size(Vec2::new(width, side), Sense::hover());
+        let rect = egui::Rect::from_center_size(outer.center(), Vec2::splat(side));
 
         if snapshot.is_none() {
             ui.painter().rect_filled(rect, 4.0, Color32::from_gray(24));
