@@ -104,12 +104,15 @@ pub fn run(args: &[String]) -> i32 {
         println!("dry run: the gradient will not be clicked\n");
     }
 
+    // Every line carries the time since the run began, so a step that takes
+    // longer than it should is visible rather than guessed at.
+    let start = std::time::Instant::now();
     let outcome = cycle::run(
         &WinWindow::mabinogi(),
         &WinScreen::new(),
         &WinMouse::new(),
         &opts,
-        |line| println!("{line}"),
+        |line| println!("[{:>5} ms] {line}", start.elapsed().as_millis()),
     );
 
     println!();

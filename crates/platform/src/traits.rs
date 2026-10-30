@@ -29,6 +29,14 @@ pub trait Screen {
     fn capture_window(&self, _id: WindowId) -> Option<Image> {
         None
     }
+
+    /// Where the palette was last seen, if the backend keeps track of it.
+    ///
+    /// A hint saves searching a captured frame for a square border.  It is only
+    /// a hint: whoever uses it still checks the palette is there.
+    fn origin_hint(&self) -> Option<(i32, i32)> {
+        None
+    }
 }
 
 /// Moves and clicks the pointer.

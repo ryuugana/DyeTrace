@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use dyetrace_core::image::{self, Image};
+use dyetrace_core::image::{self, Image, SIGNATURE_SLACK};
 use dyetrace_core::label::{self, Label};
 use dyetrace_core::{markers, palette, CAP_H, CAP_W, MAX_TARGETS};
 use dyetrace_engine::cycle::MIN_GRADIENT;
@@ -23,9 +23,7 @@ use dyetrace_platform::traits::{GameWindow, Screen, WindowId};
 use dyetrace_platform_win::{WinScreen, WinWindow};
 
 /// How often the idle palette is captured.
-const TICK: Duration = Duration::from_millis(500);
-/// How far two signatures may drift and still be the same roll of colours.
-const SIGNATURE_SLACK: u8 = 8;
+const TICK: Duration = Duration::from_millis(100);
 
 /// The palette as it was last seen.
 #[derive(Clone, Debug)]
@@ -211,5 +209,18 @@ impl Screen for Capture {
         let frame = Screen::capture_window(&self.screen, id)?;
         self.publish(&frame);
         Some(frame)
+    }
+
+    /// The corner this path last worked out, or the one the tick thread is
+    /// showing.  Either saves the engine a search of the frame.
+    fn origin_hint(&self) -> Option<(i32, i32)> {
+        if let Some(origin) = self.origin.lock().ok().and_then(|slot| *slot) {
+            return Some(origin);
+        }
+        self.shared
+            .latest
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|snapshot| snapshot.origin))
     }
 }

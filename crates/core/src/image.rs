@@ -200,6 +200,10 @@ impl Image {
 /// Side of the grid [`Image::signature`] averages over.
 const SIGNATURE_SIDE: usize = 32;
 
+/// How far two signatures may drift and still describe the same picture: room
+/// for a stray pixel or a slightly different shade, not for a new roll.
+pub const SIGNATURE_SLACK: u8 = 8;
+
 /// Do two signatures describe the same picture, within a little rendering noise?
 pub fn same_signature(a: &[u8], b: &[u8], tolerance: u8) -> bool {
     a.len() == b.len()

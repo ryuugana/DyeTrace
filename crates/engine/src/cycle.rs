@@ -16,16 +16,22 @@ use dyetrace_core::{label, markers, offsets, palette, search, CAP_H, CAP_W, MAX_
 use dyetrace_platform::traits::{GameWindow, Mouse, Rect, Screen, WindowId};
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
 /// How long to wait for the dye palette to appear.
-const GRADIENT_WAIT: Duration = Duration::from_secs(4);
+const GRADIENT_WAIT: Duration = Duration::from_millis(100);
 /// How long to wait for the client to redraw after an action.
-const SETTLE: Duration = Duration::from_millis(320);
+const SETTLE: Duration = Duration::from_millis(100);
 /// How many times to nudge the pointer while waiting for the legend.
 const LEGEND_TRIES: usize = 4;
+/// How often a wait for the client to redraw looks again, and how many looks it
+/// gets: about a third of a second before a click is called swallowed.
+const GRAB_PAUSE: Duration = Duration::from_millis(60);
+const GRAB_TRIES: usize = 6;
+/// How many looks are spent waiting for the button's label to change.
+const LABEL_TRIES: usize = 10;
 /// How many Pick Color presses one attempt may make before giving up.
 const MAX_PRESSES: usize = 2;
 /// A grab below this percentage of saturated pixels is not a dye palette.
@@ -207,9 +213,9 @@ fn settled_grab(
     origin: (i32, i32),
     log: &mut dyn FnMut(&str),
 ) -> Option<Image> {
-    for attempt in 0..8 {
+    for attempt in 0..GRAB_TRIES {
         if attempt > 0 {
-            sleep(Duration::from_millis(180));
+            sleep(GRAB_PAUSE);
         }
         match window_frame(window, screen, id) {
             Some((_, frame)) => match palette_grab(&frame, origin) {
@@ -233,27 +239,92 @@ fn settled_grab(
     None
 }
 
+/// Wait for the button's label to stop reading "Start Dyeing".
+///
+/// The click itself is quick; what varies is how long the client takes to
+/// repaint the label.  Polling ends as soon as it changes, rather than guessing
+/// a fixed settle that is either too short - the click looks swallowed - or too
+/// long, which is a fifth of a second on every cycle.
+fn wait_for_label(
+    window: &dyn GameWindow,
+    screen: &dyn Screen,
+    id: WindowId,
+    origin: (i32, i32),
+) -> Option<label::Label> {
+    let mut last = None;
+
+    for _ in 0..LABEL_TRIES {
+        sleep(GRAB_PAUSE);
+        let (_, frame) = window_frame(window, screen, id)?;
+        let label = label::read(&frame, origin);
+        if label != label::Label::StartDyeing {
+            return Some(label);
+        }
+        last = Some(label);
+    }
+
+    last
+}
+
+/// The corner the palette was last found at.
+///
+/// It does not move while the dye window stays put, and finding it costs a
+/// capture plus a search of that capture - which every attempt would pay before
+/// it could press anything.
+fn remembered_origin() -> Option<(i32, i32)> {
+    LAST_ORIGIN.lock().ok().and_then(|slot| *slot)
+}
+
+fn remember_origin(origin: (i32, i32)) {
+    if let Ok(mut slot) = LAST_ORIGIN.lock() {
+        *slot = Some(origin);
+    }
+}
+
+static LAST_ORIGIN: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+
+/// The palette's corner in a frame: a remembered one if it still holds a
+/// gradient, otherwise a search of the whole frame.
+fn origin_in(frame: &Image, hint: Option<(i32, i32)>) -> Option<(i32, i32)> {
+    if let Some(origin) = hint {
+        if let Some(image) = palette_grab(frame, origin) {
+            if palette::gradient_percent(&image) >= MIN_GRADIENT {
+                return Some(origin);
+            }
+        }
+    }
+
+    let origin = palette::find_square_field(frame).or_else(|| palette::find_field(frame))?;
+    let image = palette_grab(frame, origin)?;
+    if palette::gradient_percent(&image) >= MIN_GRADIENT {
+        Some(origin)
+    } else {
+        None
+    }
+}
+
 /// Wait until the palette is on screen and looks like a gradient.
 pub fn locate(
     window: &dyn GameWindow,
     screen: &dyn Screen,
     id: WindowId,
 ) -> Option<(Rect, (i32, i32))> {
-    let attempts = (GRADIENT_WAIT.as_millis() / 250).max(1) as usize;
+    let attempts = (GRADIENT_WAIT.as_millis() / 100).max(1) as usize;
 
-    for _ in 0..attempts {
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            sleep(Duration::from_millis(100));
+        }
         if let Some((rect, frame)) = window_frame(window, screen, id) {
-            let origin =
-                palette::find_square_field(&frame).or_else(|| palette::find_field(&frame));
-            if let Some(origin) = origin {
-                if let Some(image) = palette_grab(&frame, origin) {
-                    if palette::gradient_percent(&image) >= MIN_GRADIENT {
-                        return Some((rect, origin));
-                    }
-                }
+            // What the backend last saw first, then this process's own record:
+            // either is checked against the frame, so a stale corner costs one
+            // grab rather than a wrong answer.
+            let hint = screen.origin_hint().or_else(remembered_origin);
+            if let Some(origin) = origin_in(&frame, hint) {
+                remember_origin(origin);
+                return Some((rect, origin));
             }
         }
-        sleep(Duration::from_millis(250));
     }
 
     None
@@ -282,11 +353,11 @@ fn park(mouse: &dyn Mouse, board: &Board) -> bool {
     if !mouse.move_to(x, y) {
         return false;
     }
-    sleep(Duration::from_millis(180));
+    sleep(Duration::from_millis(70));
     mouse.nudge(2, 1);
-    sleep(Duration::from_millis(60));
+    sleep(Duration::from_millis(40));
     mouse.nudge(-2, -1);
-    sleep(Duration::from_millis(160));
+    sleep(Duration::from_millis(70));
     true
 }
 
@@ -328,7 +399,7 @@ fn read_offsets(
         mouse.nudge(step, 2);
         sleep(SETTLE);
         mouse.nudge(-step, -2);
-        sleep(Duration::from_millis(120));
+        sleep(Duration::from_millis(60));
 
         let pointer = pointer_on_palette(mouse, board);
         let (_, frame) = window_frame(window, screen, id).ok_or(ScanFail::Pointer)?;
@@ -422,10 +493,10 @@ fn prepare(
                 if !mouse.move_to(button_row.0, button_row.1) {
                     return Err(ScanFail::Pointer);
                 }
-                sleep(Duration::from_millis(200));
+                sleep(Duration::from_millis(50));
                 mouse.click();
                 presses += 1;
-                sleep(Duration::from_millis(420));
+                sleep(Duration::from_millis(150));
                 if opts.halted() {
                     return Err(ScanFail::Pointer);
                 }
@@ -515,17 +586,18 @@ fn cancel_roll(
             return false;
         }
         // Let the client register the hover before the button press.
-        sleep(Duration::from_millis(220));
+        sleep(Duration::from_millis(120));
         mouse.click();
-        sleep(SETTLE);
         if opts.halted() {
             return false;
         }
 
-        let Some((_, frame)) = window_frame(window, screen, id) else {
+        // The label changes as soon as the client has taken the click; how long
+        // that takes is the client's business, so it is waited for rather than
+        // guessed at.
+        let Some(label) = wait_for_label(window, screen, id, board.origin) else {
             return false;
         };
-        let label = label::read(&frame, board.origin);
         log(&format!("    after cancel the button reads {}", label.name()));
         if label != label::Label::StartDyeing {
             return true;

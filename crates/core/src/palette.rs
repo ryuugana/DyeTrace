@@ -14,6 +14,12 @@ pub const BORDER_SLACK: i32 = 2;
 const MIN_EDGE: i32 = 24;
 const MIN_RANGE: i32 = 30;
 
+/// How far apart the cheap pass looks, how many corners it shortlists for the
+/// full test, and how often it samples a border while shortlisting.
+const COARSE_STEP: i32 = 4;
+const SHORTLIST: usize = 8;
+const COARSE_SAMPLE: usize = 16;
+
 /// Percentage of the grab that looks like a colour gradient.
 pub fn gradient_percent(capture: &Image) -> u32 {
     let mut colourful = 0u32;
@@ -94,58 +100,143 @@ pub fn square_score(img: &Image, x: i32, y: i32) -> (i32, i32, i32) {
     (edge, range, edge * 2 + range)
 }
 
+/// Cheap per-side border strengths of a candidate square, sampled sparsely and
+/// tried over the same slack the full score uses.  Returns
+/// `(top, bottom, left, right)`.
+///
+/// The sides are kept apart on purpose: a corner with two real edges and two
+/// blank ones - the flat strip of window above a palette, whose left and right
+/// sides sit on the palette's own edges - must not score like a square.
+fn coarse_sides(img: &Image, x: i32, y: i32) -> (i32, i32, i32, i32) {
+    let mut top = 0;
+    let mut bottom = 0;
+    let mut left = 0;
+    let mut right = 0;
+
+    for d in -BORDER_SLACK..=BORDER_SLACK {
+        let mut across_top = 0;
+        let mut across_bottom = 0;
+        for i in (0..CAP_W as i32).step_by(COARSE_SAMPLE) {
+            let row = y + d;
+            across_top +=
+                (img.at(x + i, row).luminance() - img.at(x + i, row - 1).luminance()).abs();
+            let row = y + CAP_H as i32 - 1 + d;
+            across_bottom +=
+                (img.at(x + i, row).luminance() - img.at(x + i, row - 1).luminance()).abs();
+        }
+        top = top.max(across_top);
+        bottom = bottom.max(across_bottom);
+
+        let mut down_left = 0;
+        let mut down_right = 0;
+        for j in (0..CAP_H as i32).step_by(COARSE_SAMPLE) {
+            let col = x + d;
+            down_left +=
+                (img.at(col, y + j).luminance() - img.at(col - 1, y + j).luminance()).abs();
+            let col = x + CAP_W as i32 - 1 + d;
+            down_right +=
+                (img.at(col, y + j).luminance() - img.at(col - 1, y + j).luminance()).abs();
+        }
+        left = left.max(down_left);
+        right = right.max(down_right);
+    }
+
+    (top, bottom, left, right)
+}
+
+/// A cheap version of [`square_score`]: the borders and the interior are
+/// sampled sparsely, and every side has to be present.  The weakest side is
+/// weighted heavily, so a candidate with one blank border cannot rank at all.
+fn coarse_score(img: &Image, x: i32, y: i32) -> i32 {
+    let (top, bottom, left, right) = coarse_sides(img, x, y);
+    let weakest = top.min(bottom).min(left).min(right);
+
+    let mut min = 255;
+    let mut max = 0;
+    for j in (0..CAP_H as i32).step_by(COARSE_SAMPLE * 2) {
+        for i in (0..CAP_W as i32).step_by(COARSE_SAMPLE * 2) {
+            let level = img.at(x + i, y + j).luminance();
+            min = min.min(level);
+            max = max.max(level);
+        }
+    }
+
+    weakest * 4 + (max - min)
+}
+
+/// The corners worth scoring properly: each shortlisted position and every
+/// neighbour within [`COARSE_STEP`] of it, in a stable order so ties settle the
+/// same way on every run.
+fn candidates(img: &Image, shortlist: &[(i32, i32, i32)]) -> Vec<(i32, i32)> {
+    let w = img.width() as i32;
+    let h = img.height() as i32;
+    let mut spots: Vec<(i32, i32)> = Vec::new();
+
+    for (_, cx, cy) in shortlist {
+        for ry in cy - COARSE_STEP..=cy + COARSE_STEP {
+            for rx in cx - COARSE_STEP..=cx + COARSE_STEP {
+                if rx < 3
+                    || ry < 3
+                    || rx + CAP_W as i32 + BORDER_SLACK >= w
+                    || ry + CAP_H as i32 + BORDER_SLACK >= h
+                {
+                    continue;
+                }
+                spots.push((rx, ry));
+            }
+        }
+    }
+
+    spots.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    spots.dedup();
+    spots
+}
+
 /// Find the palette by its square border.  Returns the palette's top-left
 /// corner inside `img`.
+///
+/// Scoring every position of the window with the full border test costs roughly
+/// a thousand million pixel reads - seconds of wait before anything can be
+/// pressed.  A cheap pass therefore shortlists a handful of corners, and only
+/// those get the full test.
 pub fn find_square_field(img: &Image) -> Option<(i32, i32)> {
     let w = img.width() as i32;
     let h = img.height() as i32;
+
+    let mut y = 3;
+    let mut shortlist: Vec<(i32, i32, i32)> = Vec::with_capacity(SHORTLIST);
+    while y + CAP_H as i32 + BORDER_SLACK < h {
+        let mut x = 3;
+        while x + CAP_W as i32 + BORDER_SLACK < w {
+            let score = coarse_score(img, x, y);
+            if shortlist.len() < SHORTLIST || score > shortlist[SHORTLIST - 1].0 {
+                shortlist.push((score, x, y));
+                shortlist.sort_by(|a, b| b.0.cmp(&a.0));
+                shortlist.truncate(SHORTLIST);
+            }
+            x += COARSE_STEP;
+        }
+        y += COARSE_STEP;
+    }
 
     let mut best = -1;
     let (mut bx, mut by) = (0, 0);
     let (mut best_edge, mut best_range) = (0, 0);
 
-    let mut y = 3;
-    while y + CAP_H as i32 + BORDER_SLACK < h {
-        let mut x = 3;
-        while x + CAP_W as i32 + BORDER_SLACK < w {
-            let (edge, range, total) = square_score(img, x, y);
-            if total > best {
-                best = total;
-                bx = x;
-                by = y;
-                best_edge = edge;
-                best_range = range;
-            }
-            x += 4;
+    for (rx, ry) in candidates(img, &shortlist) {
+        let (edge, range, total) = square_score(img, rx, ry);
+        if total > best {
+            best = total;
+            bx = rx;
+            by = ry;
+            best_edge = edge;
+            best_range = range;
         }
-        y += 4;
     }
 
     if best < 0 {
         return None;
     }
-
-    // A 4 px grid rarely lands on the border; refine around the best cell.
-    for ry in by - 4..=by + 4 {
-        for rx in bx - 4..=bx + 4 {
-            if rx < 3
-                || ry < 3
-                || rx + CAP_W as i32 + BORDER_SLACK >= w
-                || ry + CAP_H as i32 + BORDER_SLACK >= h
-            {
-                continue;
-            }
-            let (edge, range, total) = square_score(img, rx, ry);
-            if total > best {
-                best = total;
-                bx = rx;
-                by = ry;
-                best_edge = edge;
-                best_range = range;
-            }
-        }
-    }
-
     if best_edge < MIN_EDGE || best_range < MIN_RANGE {
         return None;
     }
