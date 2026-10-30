@@ -12,8 +12,6 @@ use crate::preview::{Capture, Preview};
 
 #[derive(Clone, Debug)]
 pub enum Job {
-    /// Prepare a search and report the best candidate; never clicks.
-    Scan(Options),
     /// Run the whole cycle.
     Auto(Options),
 }
@@ -94,34 +92,18 @@ fn run_job(job: Job, capture: &Capture, messages: &Sender<Msg>, stop: &Arc<Atomi
     };
 
     match job {
-        Job::Scan(mut opts) => {
-            opts.stop = Some(Arc::clone(stop));
-            send(Msg::Status("scanning".to_string()));
-            match cycle::scan_once(&window, capture, &mouse, &opts) {
-                Ok(scan) => {
-                    let mut summary = match scan.best {
-                        Some(best) => format!(
-                            "best ({},{}) - {} #{}",
-                            best.x,
-                            best.y,
-                            cycle::found_phrase(best.count, scan.asked, scan.asked < scan.table.len()),
-                            hex(opts.colour)
-                        ),
-                        None => "no candidate".to_string(),
-                    };
-                    if scan.armed {
-                        summary.push_str(" (armed the picker)");
-                    }
-                    send(Msg::Status(summary));
-                    send(Msg::Scanned(Box::new(scan)));
-                }
-                Err(err) => send(Msg::Status(fail_text(err))),
-            }
-        }
-
         Job::Auto(mut opts) => {
             opts.stop = Some(Arc::clone(stop));
-            send(Msg::Status("auto running - Stop to end".to_string()));
+            send(Msg::Status("starting".to_string()));
+
+            // Measure the offsets first, and show them: the run arms the picker
+            // anyway, so this costs one pass and the window can mark the samples
+            // while the cycle goes.
+            match cycle::scan_once(&window, capture, &mouse, &opts) {
+                Ok(scan) => send(Msg::Scanned(Box::new(scan))),
+                Err(err) => send(Msg::Status(fail_text(err))),
+            }
+
             let outcome = cycle::run(&window, capture, &mouse, &opts, |_| {});
             send(Msg::Status(match outcome {
                 cycle::Outcome::Matched {

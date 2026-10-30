@@ -62,6 +62,8 @@ pub struct DyeTraceApp {
     stop_on: egui::Key,
     /// Waiting for the player to press the key they want.
     recording: bool,
+    /// Is the About window open?
+    about: bool,
     scan: Option<Scan>,
     status: String,
 
@@ -98,6 +100,7 @@ impl DyeTraceApp {
             stop_key,
             stop_on: hotkey::default_key(),
             recording: false,
+            about: false,
             scan: None,
             status: "watching for the dye window".to_string(),
         };
@@ -297,26 +300,46 @@ impl DyeTraceApp {
 
         ui.add_space(14.0);
         let busy = self.worker.busy;
+        let side = ui.available_width().min(120.0);
+
         ui.horizontal(|ui| {
-            if ui.add_enabled(!busy, egui::Button::new("Scan")).clicked() {
-                self.worker.submit(Job::Scan(self.options(true)));
-            }
-            if ui.add_enabled(!busy, egui::Button::new("Start")).clicked() {
-                self.worker.submit(Job::Auto(self.options(false)));
+            let row = ui.cursor().min.x;
+
+            let mut start = false;
+            let mut about = false;
+            ui.add_enabled_ui(!busy, |ui| {
+                start = ui
+                    .add_sized([58.0, 26.0], egui::Button::new("Start"))
+                    .clicked();
+                about = ui
+                    .add_sized([58.0, 26.0], egui::Button::new("About"))
+                    .clicked();
+            });
+
+            // The stop key sits in the same column as the numbers above it.
+            let want = row + side + 16.0;
+            let here = ui.cursor().min.x;
+            if want > here {
+                ui.add_space(want - here);
             }
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let shown = if self.recording {
-                    "press a key".to_string()
-                } else {
-                    self.stop_on.name().to_string()
-                };
-                ui.label(RichText::new(shown).strong());
-                if ui.button("Set").clicked() {
-                    self.recording = true;
-                }
-                ui.label("Stop key");
-            });
+            ui.label("Stop key");
+            if ui.add_sized([40.0, 26.0], egui::Button::new("Set")).clicked() {
+                self.recording = true;
+            }
+            let shown = if self.recording {
+                "press a key".to_string()
+            } else {
+                self.stop_on.name().to_string()
+            };
+            ui.label(RichText::new(shown).strong().size(15.0));
+
+            if start {
+                self.worker.submit(Job::Auto(self.options(false)));
+            }
+            if about {
+                self.about = true;
+            }
         });
     }
 
@@ -523,6 +546,45 @@ impl DyeTraceApp {
         }
     }
 
+    /// What the tool is, and how to use it.
+    fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.about {
+            return;
+        }
+
+        let mut open = true;
+        egui::Window::new("About DyeTrace")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(340.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new("An open-source dye palette finder for Mabinogi").strong(),
+                );
+                ui.add_space(6.0);
+                ui.label("Open the Dye window in game and leave it visible.");
+                ui.label(
+                    "The picture on the right is the palette: white where the colour is not",
+                );
+                ui.label("there, red where it is.");
+                ui.label("1. Pick the colour: RGB, hex, or the square.");
+                ui.label("2. Dye spots is how many of the five samples must hold it;");
+                ui.label("   Slot pins particular samples the dye window numbers 1 to 5.");
+                ui.label("3. Start rolls the dye until it finds a place and clicks it.");
+                ui.label("4. The stop key ends a run; Set records a different one.");
+                ui.add_space(8.0);
+                ui.hyperlink_to(
+                    "github.com/ryuugana/DyeTrace",
+                    "https://github.com/ryuugana/DyeTrace",
+                );
+                ui.label(RichText::new("MIT licensed.").weak().small());
+            });
+
+        self.about = open;
+    }
+
     /// The one line of feedback, along the bottom edge of the window.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
@@ -555,6 +617,7 @@ impl eframe::App for DyeTraceApp {
 
         egui::SidePanel::left("controls")
             .resizable(false)
+            .default_width(340.0)
             .exact_width(310.0)
             .show(ctx, |ui| {
                 self.controls(ui);
@@ -563,5 +626,7 @@ impl eframe::App for DyeTraceApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| self.preview_panel(ui));
         });
+
+        self.about_window(ctx);
     }
 }

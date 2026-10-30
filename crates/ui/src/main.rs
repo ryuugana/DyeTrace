@@ -18,7 +18,8 @@ fn main() -> eframe::Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([640.0, 386.0])
             .with_min_inner_size([620.0, 366.0])
-            .with_title("DyeTrace"),
+            .with_title("DyeTrace")
+            .with_resizable(false),
         ..Default::default()
     };
 

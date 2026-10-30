@@ -74,8 +74,8 @@ The preview looks after itself: as soon as the dye window is on screen it shows
 the hit map for the chosen colour, and it keeps it current. It pauses while a
 colour is being picked (the button reads Start Dyeing) and resumes on Cancel,
 because a legend drawn over the grid would otherwise end up in the picture. The
-sample markers belong to the roll they were measured on: once the palette is
-rolled again they disappear until the next Scan.
+sample markers belong to the roll they were measured on: a rolled palette means
+they disappear until a run measures them again.
 
 | Control | Meaning |
 |---|---|
@@ -86,8 +86,8 @@ rolled again they disappear until the next Scan.
 | `Dye spots` | How many of the five samples must hold the colour (1–5). Which samples fill that up is where `Slot` comes in. |
 | `Retries` | How many new rolls a run may try, after the first, before giving up. `0` keeps rolling until a match or the stop key. |
 | `Variance ±` | Per-channel tolerance as a number, or drag the slider below it. `0` = exact match. |
-| `Scan` | Read the client's sample offsets, search, and draw the hit map. Nothing is clicked except Pick Color, and only if the picker is not already armed. |
 | `Start` | Run the cycle until it clicks a match or the stop key is pressed. |
+| `About` | What the tool does, the short version of the steps, and the repository link. |
 | `Stop key` | `Set` waits for a key press and records it; the key shown beside the button is the one that stops a running cycle. Space by default. It is polled globally, so it works while the game has the keyboard focus. |
 
 The preview is the same view the original presents: white with red where the
