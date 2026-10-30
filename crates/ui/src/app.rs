@@ -47,6 +47,8 @@ pub struct DyeTraceApp {
 
     slots: usize,
     variance: u8,
+    /// Rolls Auto may try after the first before giving up.
+    retries: usize,
     /// Slots that must hold the colour, numbered as the dye window does.  Empty
     /// falls back to `slots`.
     slots_only: Vec<usize>,
@@ -81,6 +83,7 @@ impl DyeTraceApp {
             value: 0.0,
             slots: 1,
             variance: 0,
+            retries: 20,
             slots_only: Vec::new(),
             presets: Presets::load(),
             save_name: String::new(),
@@ -121,6 +124,8 @@ impl DyeTraceApp {
             variance: self.variance,
             slots: self.slots,
             slots_only: self.slots_only.clone(),
+            // One roll is the attempt; the rest are retries.
+            max_cycles: self.retries.saturating_add(1),
             dry_run,
             stop: self.worker.stop_flag(),
             ..Options::default()
@@ -338,20 +343,32 @@ impl DyeTraceApp {
         });
 
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label("Dye spots");
-            ui.add_sized(
-                [46.0, 18.0],
-                egui::DragValue::new(&mut self.slots).range(1..=5).speed(0.1),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label("Variance ±");
-            ui.add_sized(
-                [46.0, 18.0],
-                egui::DragValue::new(&mut self.variance).range(0..=255).speed(1.0),
-            );
-        });
+        egui::Grid::new("match-controls")
+            .num_columns(2)
+            .spacing([6.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Dye spots");
+                ui.add_sized(
+                    [46.0, 18.0],
+                    egui::DragValue::new(&mut self.slots).range(1..=5).speed(0.1),
+                );
+                ui.end_row();
+
+                ui.label("Retries");
+                ui.add_sized(
+                    [46.0, 18.0],
+                    egui::DragValue::new(&mut self.retries).range(0..=99).speed(0.1),
+                );
+                ui.end_row();
+
+                ui.label("Variance ±");
+                ui.add_sized(
+                    [46.0, 18.0],
+                    egui::DragValue::new(&mut self.variance).range(0..=255).speed(1.0),
+                );
+                ui.end_row();
+            });
+
         ui.add_space(3.0);
         ui.spacing_mut().slider_width = (ui.available_width() - 10.0).max(60.0);
         ui.add(egui::Slider::new(&mut self.variance, 0..=255).show_value(false));
