@@ -2,8 +2,8 @@
 //!
 //! One capture path feeds both the picture on screen and the search: every frame
 //! the engine grabs goes through [`Capture`], which publishes the palette it
-//! contains.  A thread of its own does the same every half second, so the
-//! picture is current even when nothing is being scanned.
+//! contains.  A thread of its own does the same once a second, so the picture
+//! is current even when nothing is being scanned.
 //!
 //! A colour being picked freezes the view.  While the button reads "Start
 //! Dyeing" the tick stops publishing, because a legend drawn over the grid would
@@ -22,8 +22,8 @@ use dyetrace_engine::cycle::MIN_GRADIENT;
 use dyetrace_platform::traits::{GameWindow, Screen, WindowId};
 use dyetrace_platform_native::{NativeScreen, NativeWindow};
 
-/// How often the idle palette is captured.
-const TICK: Duration = Duration::from_millis(100);
+/// How often the idle palette is captured and searched for.
+const TICK: Duration = Duration::from_secs(1);
 
 /// The palette as it was last seen.
 #[derive(Clone, Debug)]
